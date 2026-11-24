@@ -1,3 +1,5 @@
+using Emendly.Capture;
+
 namespace Emendly.Probe;
 
 internal static class Program

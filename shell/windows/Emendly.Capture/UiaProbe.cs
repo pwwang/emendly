@@ -3,7 +3,7 @@ using System.Text;
 using System.Windows.Automation;
 using System.Windows.Automation.Text;
 
-namespace Emendly.Probe;
+namespace Emendly.Capture;
 
 public sealed record ProbeOutcome(ProbeReport? Report, bool TimedOut, string? ErrorMessage)
 {
@@ -12,15 +12,48 @@ public sealed record ProbeOutcome(ProbeReport? Report, bool TimedOut, string? Er
     public static ProbeOutcome Failure(string message) => new(null, false, message);
 }
 
+public sealed record CaptureSnapshot(
+    ProbeReport Report,
+    string SelectedText,
+    string FieldContext,
+    CaretLocation CaretLocation);
+
+public sealed record CaptureOutcome(CaptureSnapshot? Snapshot, bool TimedOut, string? ErrorMessage)
+{
+    public static CaptureOutcome Success(CaptureSnapshot snapshot) => new(snapshot, false, null);
+    public static CaptureOutcome Timeout() => new(null, true, "timeout");
+    public static CaptureOutcome Failure(string message) => new(null, false, message);
+}
+
 public static class UiaProbe
 {
     private const int MaxPreviewLength = 80;
+    private const int MaxFieldContextLength = 4000;
     private const int MaxVisitedNodes = 2000;
     private const int MaxParentDepth = 64;
 
     public static ProbeOutcome ProbeWithTimeout(WindowInfo window, TimeSpan timeout)
     {
-        ProbeReport? report = null;
+        var outcome = ExecuteWithTimeout(window, timeout, includeTextDetails: false);
+        if (outcome.TimedOut)
+        {
+            return ProbeOutcome.Timeout();
+        }
+
+        if (outcome.Snapshot is null)
+        {
+            return ProbeOutcome.Failure(outcome.ErrorMessage ?? "probe produced no report");
+        }
+
+        return ProbeOutcome.Success(outcome.Snapshot.Report);
+    }
+
+    public static CaptureOutcome CaptureWithTimeout(WindowInfo window, TimeSpan timeout) =>
+        ExecuteWithTimeout(window, timeout, includeTextDetails: true);
+
+    private static CaptureOutcome ExecuteWithTimeout(WindowInfo window, TimeSpan timeout, bool includeTextDetails)
+    {
+        CaptureSnapshot? snapshot = null;
         Exception? failure = null;
         var deadline = DateTime.UtcNow + timeout;
 
@@ -28,7 +61,7 @@ public static class UiaProbe
         {
             try
             {
-                report = ProbeInternal(window, deadline);
+                snapshot = ProbeInternal(window, deadline, includeTextDetails);
             }
             catch (Exception ex)
             {
@@ -44,40 +77,40 @@ public static class UiaProbe
 
         if (!worker.Join(timeout))
         {
-            return ProbeOutcome.Timeout();
+            return CaptureOutcome.Timeout();
         }
 
         if (failure is not null)
         {
-            return ProbeOutcome.Failure(failure.Message);
+            return CaptureOutcome.Failure(failure.Message);
         }
 
-        if (report is null)
+        if (snapshot is null)
         {
-            return ProbeOutcome.Failure("probe produced no report");
+            return CaptureOutcome.Failure("probe produced no report");
         }
 
-        return ProbeOutcome.Success(report);
+        return CaptureOutcome.Success(snapshot);
     }
 
-    private static ProbeReport ProbeInternal(WindowInfo window, DateTime deadline)
+    private static CaptureSnapshot ProbeInternal(WindowInfo window, DateTime deadline, bool includeTextDetails)
     {
         var windowElement = SafeCall<AutomationElement?>(() => AutomationElement.FromHandle(window.Hwnd), null);
         if (windowElement is null)
         {
-            return UnsupportedReport(window);
+            return UnsupportedSnapshot(window, includeTextDetails);
         }
 
         var targetElement = ResolveTextElement(windowElement, window.Hwnd, deadline);
         if (targetElement is null)
         {
-            return UnsupportedReport(window);
+            return UnsupportedSnapshot(window, includeTextDetails);
         }
 
         var textPattern = TryGetTextPattern(targetElement);
         if (textPattern is null)
         {
-            return UnsupportedReport(window);
+            return UnsupportedSnapshot(window, includeTextDetails);
         }
 
         var elementInfo = ReadElementInfo(targetElement);
@@ -92,8 +125,12 @@ public static class UiaProbe
         var readOnly = DetermineReadOnly(valuePattern, textPattern, enabled);
 
         var docRange = SafeCall<TextPatternRange?>(() => textPattern.DocumentRange, null);
-        var fieldTextLength = ReadFieldTextLength(docRange, valuePattern);
-        var (selection, caret) = ReadSelectionAndCaret(textPattern, docRange);
+        var fieldText = includeTextDetails ? ReadFieldText(docRange, valuePattern) : null;
+        var fieldTextLength = fieldText is not null
+            ? fieldText.Length
+            : ReadFieldTextLength(docRange, valuePattern);
+
+        var (selection, caret, selectedText, primarySelection) = ReadSelectionAndCaret(textPattern, docRange);
 
         if (selection.Length > fieldTextLength)
         {
@@ -102,7 +139,7 @@ public static class UiaProbe
 
         var verdict = ComputeVerdict(enabled, readOnly, selection.Length);
 
-        return new ProbeReport(
+        var report = new ProbeReport(
             Hwnd: WindowEnumerator.FormatHwnd(window.Hwnd),
             Process: window.ProcessName,
             Title: window.Title,
@@ -115,7 +152,30 @@ public static class UiaProbe
             Caret: caret,
             FieldTextLength: fieldTextLength,
             Verdict: verdict);
+
+        var caretLocation = includeTextDetails
+            ? CaretLocator.Locate(primarySelection, window.Hwnd)
+            : CaretLocator.GetMouseFallback();
+
+        var fieldContext = includeTextDetails
+            ? ExtractSurroundingContext(fieldText ?? string.Empty, caret.Offset)
+            : string.Empty;
+
+        return new CaptureSnapshot(
+            Report: report,
+            SelectedText: includeTextDetails ? selectedText : string.Empty,
+            FieldContext: fieldContext,
+            CaretLocation: caretLocation);
     }
+
+    private static CaptureSnapshot UnsupportedSnapshot(WindowInfo window, bool includeTextDetails) =>
+        new(
+            Report: UnsupportedReport(window),
+            SelectedText: string.Empty,
+            FieldContext: string.Empty,
+            CaretLocation: includeTextDetails
+                ? CaretLocator.Locate(null, window.Hwnd)
+                : CaretLocator.GetMouseFallback());
 
     private static AutomationElement? ResolveTextElement(
         AutomationElement windowElement,
@@ -278,7 +338,41 @@ public static class UiaProbe
         return 0;
     }
 
-    private static (SelectionInfo Selection, CaretInfo Caret) ReadSelectionAndCaret(
+    private static string ReadFieldText(TextPatternRange? docRange, ValuePattern? valuePattern)
+    {
+        var text = SafeCall<string?>(() => docRange?.GetText(-1), null);
+        if (text is not null)
+        {
+            return text;
+        }
+
+        if (valuePattern is not null)
+        {
+            return SafeCall(() => valuePattern.Current.Value ?? string.Empty, string.Empty);
+        }
+
+        return string.Empty;
+    }
+
+    private static string ExtractSurroundingContext(string fieldText, int? caretOffset)
+    {
+        if (string.IsNullOrWhiteSpace(fieldText))
+        {
+            return string.Empty;
+        }
+
+        if (fieldText.Length <= MaxFieldContextLength)
+        {
+            return fieldText;
+        }
+
+        var center = Math.Clamp(caretOffset ?? fieldText.Length, 0, fieldText.Length);
+        var half = MaxFieldContextLength / 2;
+        var start = Math.Clamp(center - half, 0, fieldText.Length - MaxFieldContextLength);
+        return fieldText.Substring(start, MaxFieldContextLength);
+    }
+
+    private static (SelectionInfo Selection, CaretInfo Caret, string SelectedText, TextPatternRange? PrimarySelection) ReadSelectionAndCaret(
         TextPattern textPattern,
         TextPatternRange? docRange)
     {
@@ -288,7 +382,7 @@ public static class UiaProbe
 
         if (selections.Length == 0 || selections[0] is not { } primarySelection)
         {
-            return (new SelectionInfo(0, string.Empty), new CaretInfo(false, null));
+            return (new SelectionInfo(0, string.Empty), new CaretInfo(false, null), string.Empty, null);
         }
 
         var selectedText = SafeCall(() => primarySelection.GetText(-1) ?? string.Empty, string.Empty);
@@ -308,7 +402,7 @@ public static class UiaProbe
             }, null);
         }
 
-        return (selection, new CaretInfo(true, caretOffset));
+        return (selection, new CaretInfo(true, caretOffset), selectedText, primarySelection);
     }
 
     private static string ComputeVerdict(bool enabled, bool readOnly, int selectionLength)

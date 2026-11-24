@@ -10,4 +10,8 @@
     <RootNamespace>Emendly.Probe</RootNamespace>
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\Emendly.Capture\Emendly.Capture.csproj" />
+  </ItemGroup>
+
 </Project>

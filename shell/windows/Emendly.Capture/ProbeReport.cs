@@ -2,7 +2,7 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace Emendly.Probe;
+namespace Emendly.Capture;
 
 public sealed record ElementInfo(
     [property: JsonPropertyName("name")] string Name,

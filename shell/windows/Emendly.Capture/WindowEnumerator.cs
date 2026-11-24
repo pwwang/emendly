@@ -3,7 +3,7 @@ using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
 
-namespace Emendly.Probe;
+namespace Emendly.Capture;
 
 public sealed record WindowInfo(
     IntPtr Hwnd,
@@ -14,6 +14,8 @@ public sealed record WindowInfo(
 
 public static class WindowEnumerator
 {
+    private const int SwRestore = 9;
+
     private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
     [StructLayout(LayoutKind.Sequential)]
@@ -42,6 +44,21 @@ public static class WindowEnumerator
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    internal static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsIconic(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -166,6 +183,30 @@ public static class WindowEnumerator
 
         return null;
     }
+
+    public static WindowInfo? GetForegroundWindowInfo()
+    {
+        var hwnd = GetForegroundWindow();
+        return GetWindowInfo(hwnd);
+    }
+
+    public static bool RestoreForeground(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero || !IsWindow(hwnd))
+        {
+            return false;
+        }
+
+        if (IsIconic(hwnd))
+        {
+            _ = ShowWindow(hwnd, SwRestore);
+        }
+
+        return SetForegroundWindow(hwnd);
+    }
+
+    public static bool IsWindowAlive(IntPtr hwnd) =>
+        hwnd != IntPtr.Zero && IsWindow(hwnd);
 
     public static WindowInfo? GetWindowInfo(IntPtr hwnd)
     {
