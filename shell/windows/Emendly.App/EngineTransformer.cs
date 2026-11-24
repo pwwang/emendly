@@ -144,10 +144,26 @@ public sealed class EngineTransformer : ITransformer
         }
 
         var process = new Process { StartInfo = startInfo };
-        if (!process.Start())
+        try
+        {
+            if (!process.Start())
+            {
+                process.Dispose();
+                throw new TransformException("internal", "Failed to start engine process.", retryable: false);
+            }
+        }
+        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode is 193 or 216)
         {
             process.Dispose();
-            throw new TransformException("internal", "Failed to start engine process.", retryable: false);
+            throw new TransformException(
+                "internal",
+                $"The engine at {_enginePath} is not a Windows build ({ex.NativeErrorCode}). Build it for Windows, or point EMENDLY_ENGINE at a Windows binary.",
+                retryable: false);
+        }
+        catch (System.ComponentModel.Win32Exception ex)
+        {
+            process.Dispose();
+            throw new TransformException("internal", $"The engine could not start: {ex.Message}", retryable: false);
         }
 
         _process = process;
