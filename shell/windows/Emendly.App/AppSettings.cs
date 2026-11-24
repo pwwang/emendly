@@ -142,6 +142,24 @@ public sealed class AppSettings
 
     private static string? ResolveBinaryCandidate(string path)
     {
+        // On Windows the .exe must win. A stale extensionless file in the same folder
+        // is usually the Linux build, and starting it fails with Win32 error 193.
+        if (OperatingSystem.IsWindows())
+        {
+            var windowsPath = path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? path : path + ".exe";
+            if (File.Exists(windowsPath))
+            {
+                return Path.GetFullPath(windowsPath);
+            }
+
+            if (File.Exists(path))
+            {
+                return Path.GetFullPath(path);
+            }
+
+            return null;
+        }
+
         if (File.Exists(path))
         {
             return Path.GetFullPath(path);
@@ -181,7 +199,7 @@ public static class ShellLogger
             status,
         });
 
-        Debug.WriteLine($"[Emendly] {record}");
+        Append(record);
     }
 
     public static void LogMeta(string eventName, string processName, string status)
@@ -194,6 +212,36 @@ public static class ShellLogger
             status,
         });
 
+        Append(record);
+    }
+
+    public static void LogNote(string eventName, string message)
+    {
+        var record = JsonSerializer.Serialize(new
+        {
+            ts = DateTimeOffset.UtcNow.ToString("O"),
+            @event = eventName,
+            message,
+        });
+
+        Append(record);
+    }
+
+    private static void Append(string record)
+    {
         Debug.WriteLine($"[Emendly] {record}");
+
+        try
+        {
+            var dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "Emendly");
+            Directory.CreateDirectory(dir);
+            File.AppendAllText(Path.Combine(dir, "emendly.log"), record + Environment.NewLine);
+        }
+        catch
+        {
+            // Logging must never take the shell down.
+        }
     }
 }

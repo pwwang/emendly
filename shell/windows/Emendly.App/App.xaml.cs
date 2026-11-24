@@ -58,10 +58,12 @@ public partial class App : Application
         if (!string.IsNullOrEmpty(enginePath))
         {
             ShellLogger.LogMeta("startup", "emendly", "engine");
+            ShellLogger.LogNote("engine_path", enginePath);
             return new EngineTransformer(enginePath, settings.BaseUrl, settings.Model);
         }
 
         ShellLogger.LogMeta("startup", "emendly", "echo_fallback");
+        ShellLogger.LogNote("engine_path", "none resolved");
         return new EchoTransformer();
     }
 
