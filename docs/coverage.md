@@ -32,3 +32,16 @@ Empty until the macOS shell exists.
 4. Click into an empty field, press the hotkey. Check that the panel opens in compose mode, not selection mode.
 5. Paste a sentence, put the caret mid-word, run `rewrite`. Check that only the selection changes, never the whole field.
 6. Record the app version. Accessibility behaviour changes between releases.
+
+## Measured on 2026-11-23, Windows 11
+
+Probe: `shell/windows/Emendly.Probe`, UI Automation control view.
+
+| App | Selection read | Caret read | Verdict from probe | Note |
+|---|---|---|---|---|
+| Notepad (classic) | pending | pass | `caret` | `TextPattern` on `Document`, caret offset 484 of 512 chars, not read-only |
+| Google Chrome (page) | pass | pass | `read_only` | `Document` exposes `TextPattern`; selection length 43; the page is read-only until a field has focus |
+| Notepad3 | fail | fail | `unsupported` | Scintilla exposes no text element to UIA. Expect the same for Notepad++ |
+| Windows Settings | fail | fail | `unsupported` | No text element, as expected |
+
+Consequence: Scintilla-based editors need the clipboard fallback path before they can be supported.
