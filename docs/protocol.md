@@ -1,0 +1,84 @@
+# Protocol: engine and shell
+
+The engine is a long-lived child process. The shell starts it once and keeps it open. They exchange newline-delimited JSON: one object per line, no pretty printing, UTF-8.
+
+## Why a separate process
+
+- One engine serves every platform shell, so prompts, providers and streaming are written once.
+- The shell holds the OS permissions; the engine holds no privileges.
+- A crashed engine cannot take the UI down, and a shell update never touches provider logic.
+- The contract is inspectable. A test can drive the engine with plain text on stdin.
+
+## Requests
+
+Every request is one line with an `id` and a `type`.
+
+```json
+{"id":"r1","type":"health"}
+{"id":"r2","type":"actions.list"}
+{"id":"r3","type":"config.get"}
+{"id":"r4","type":"config.set","patch":{"model":"gpt-5-mini"}}
+{"id":"r5","type":"actions.run","action":"proofread","text":"their going too the store"}
+{"id":"r6","type":"actions.run","action":"rewrite","text":"We need this by Friday.","options":{"tone":"professional"}}
+{"id":"r7","type":"actions.run","action":"translate","text":"Good morning","options":{"target_lang":"German"}}
+{"id":"r8","type":"actions.run","action":"compose","text":"","options":{"brief":"Decline the meeting politely, offer Tuesday","context":"Email to a vendor"}}
+{"id":"r9","type":"cancel","target":"r5"}
+{"id":"r10","type":"shutdown"}
+```
+
+Rules:
+
+- `id` is caller-chosen, unique per session, and echoed in every event for that request.
+- `text` is the selected text, or empty for `compose`.
+- `options` is free-form per action; unknown keys are ignored, not rejected.
+- `context` is optional surrounding text the shell read from the same field. The engine never reads it from anywhere else.
+
+## Events
+
+```json
+{"id":"r5","event":"started","action":"proofread","model":"gpt-5-mini"}
+{"id":"r5","event":"delta","text":"their "}
+{"id":"r5","event":"delta","text":"going to the store"}
+{"id":"r5","event":"done","text":"they're going to the store","usage":{"input_tokens":18,"output_tokens":9},"latency_ms":740}
+{"id":"r5","event":"error","code":"provider_auth","message":"the configured key was rejected","retryable":false}
+```
+
+Rules:
+
+- `started` comes once, before the first `delta`.
+- `delta` events are ordered and additive. The shell appends them.
+- `done` carries the full replacement text, so a shell that missed a delta can still apply the result.
+- `error` ends the request. No `done` follows it.
+- `cancel` ends a request with `{"event":"cancelled"}`, and must abort the HTTP call.
+- Unknown request types produce `error` with code `bad_request`, never a panic.
+
+## Error codes
+
+| Code | Meaning | Retryable |
+|---|---|---|
+| `bad_request` | Malformed line, unknown type, missing text | no |
+| `unknown_action` | `action` is not in the registry | no |
+| `missing_key` | No API key in the environment or keychain | no |
+| `provider_auth` | Provider rejected the key | no |
+| `provider_rate_limit` | Provider asked us to slow down | yes |
+| `provider_error` | Provider returned 5xx or an invalid body | yes |
+| `network` | DNS, TLS or connection failure | yes |
+| `timeout` | Request exceeded the action's deadline | yes |
+| `cancelled` | Caller cancelled | no |
+| `internal` | Anything else, with no user text in the message | no |
+
+## Config
+
+`config.get` returns the effective config. `config.set` applies a patch and returns the new config.
+
+```json
+{"provider":{"base_url":"https://api.openai.com/v1","model":"gpt-5-mini","timeout_ms":20000},
+ "language":{"ui":"en","default_target":"German"},
+ "logging":{"level":"warn","path":""}}
+```
+
+The API key is never part of this object. It is read from `EMENDLY_API_KEY` at call time, or from the OS keychain through the shell.
+
+## Versioning
+
+`health` returns `{"event":"health","version":"0.1.0","protocol":1}`. The shell refuses to run against a protocol it does not know.

@@ -1,0 +1,29 @@
+# Rust
+/engine/target/
+**/*.rs.bk
+
+# .NET and WinUI
+shell/windows/**/bin/
+shell/windows/**/obj/
+.vs/
+*.user
+*.suo
+
+# macOS
+.DS_Store
+shell/macos/**/build/
+shell/macos/**/DerivedData/
+
+# Node, for tooling only
+node_modules/
+
+# Local secrets and settings
+.env
+.env.*
+*.local.json
+.claude/settings.local.json
+keys.json
+
+# Build output
+dist/
+*.log
