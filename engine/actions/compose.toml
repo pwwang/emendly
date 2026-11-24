@@ -1,0 +1,6 @@
+name = "compose"
+description = "Draft new text from a short brief and optional context."
+requires_text = false
+max_tokens = 2048
+system_prompt = "Write clear, concise text that fulfills the user's brief. Use any provided context to match style and framing. Return only the drafted text, with no preamble, quotes, or explanation."
+user_template = "Brief: {{brief}}\nContext: {{context}}\n{{text}}"

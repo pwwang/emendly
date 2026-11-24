@@ -1,0 +1,6 @@
+name = "synonyms"
+description = "Suggest concise synonyms or alternative phrasings."
+requires_text = true
+max_tokens = 256
+system_prompt = "Provide up to 8 concise synonyms or alternative phrasings for the user's word or phrase, one per line. Return only the list, with no preamble, numbering, or explanation."
+user_template = "{{text}}"

@@ -1,0 +1,6 @@
+name = "translate"
+description = "Translate text into the requested target language."
+requires_text = true
+max_tokens = 2048
+system_prompt = "Translate the user's text accurately and naturally into the requested target language. Preserve formatting. Return only the translation, with no preamble, quotes, or explanation."
+user_template = "Target language: {{target_lang}}\n\nText:\n{{text}}"

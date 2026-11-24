@@ -1,0 +1,281 @@
+use std::collections::BTreeMap;
+
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+use crate::config::{Config, ConfigPatch};
+
+pub const PROTOCOL_VERSION: u32 = 1;
+pub const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ErrorCode {
+    BadRequest,
+    UnknownAction,
+    MissingKey,
+    ProviderAuth,
+    ProviderRateLimit,
+    ProviderError,
+    Network,
+    Timeout,
+    Cancelled,
+    Internal,
+}
+
+impl ErrorCode {
+    pub fn is_retryable(self) -> bool {
+        matches!(
+            self,
+            Self::ProviderRateLimit | Self::ProviderError | Self::Network | Self::Timeout
+        )
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum EngineError {
+    #[error("{0}")]
+    BadRequest(String),
+    #[error("unknown action: {0}")]
+    UnknownAction(String),
+    #[error("EMENDLY_API_KEY is not set")]
+    MissingKey,
+    #[error("{0}")]
+    ProviderAuth(String),
+    #[error("{0}")]
+    ProviderRateLimit(String),
+    #[error("{0}")]
+    ProviderError(String),
+    #[error("{0}")]
+    Network(String),
+    #[error("request timed out")]
+    Timeout,
+    #[error("request cancelled")]
+    Cancelled,
+    #[error("{0}")]
+    Internal(String),
+}
+
+impl EngineError {
+    pub fn code(&self) -> ErrorCode {
+        match self {
+            Self::BadRequest(_) => ErrorCode::BadRequest,
+            Self::UnknownAction(_) => ErrorCode::UnknownAction,
+            Self::MissingKey => ErrorCode::MissingKey,
+            Self::ProviderAuth(_) => ErrorCode::ProviderAuth,
+            Self::ProviderRateLimit(_) => ErrorCode::ProviderRateLimit,
+            Self::ProviderError(_) => ErrorCode::ProviderError,
+            Self::Network(_) => ErrorCode::Network,
+            Self::Timeout => ErrorCode::Timeout,
+            Self::Cancelled => ErrorCode::Cancelled,
+            Self::Internal(_) => ErrorCode::Internal,
+        }
+    }
+
+    pub fn to_event(&self, id: String) -> Event {
+        if matches!(self, Self::Cancelled) {
+            return Event::new(id, EventKind::Cancelled);
+        }
+        let code = self.code();
+        Event::new(
+            id,
+            EventKind::Error {
+                code,
+                message: self.to_string(),
+                retryable: code.is_retryable(),
+            },
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Request {
+    pub id: String,
+    #[serde(flatten)]
+    pub kind: RequestKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum RequestKind {
+    #[serde(rename = "health")]
+    Health,
+    #[serde(rename = "actions.list")]
+    ActionsList,
+    #[serde(rename = "config.get")]
+    ConfigGet,
+    #[serde(rename = "config.set")]
+    ConfigSet { patch: ConfigPatch },
+    #[serde(rename = "actions.run")]
+    ActionsRun {
+        action: String,
+        #[serde(default)]
+        text: String,
+        #[serde(default)]
+        options: BTreeMap<String, serde_json::Value>,
+        #[serde(default)]
+        context: Option<String>,
+        #[serde(default)]
+        app: Option<String>,
+        #[serde(default)]
+        stream: Option<bool>,
+    },
+    #[serde(rename = "cancel")]
+    Cancel { target: String },
+    #[serde(rename = "shutdown")]
+    Shutdown,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Usage {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActionInfo {
+    pub name: String,
+    pub description: String,
+    pub requires_text: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Event {
+    pub id: String,
+    #[serde(flatten)]
+    pub kind: EventKind,
+}
+
+impl Event {
+    pub fn new(id: String, kind: EventKind) -> Self {
+        Self { id, kind }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "event", rename_all = "snake_case")]
+pub enum EventKind {
+    Health {
+        version: String,
+        protocol: u32,
+    },
+    Actions {
+        actions: Vec<ActionInfo>,
+    },
+    Config {
+        config: Config,
+    },
+    Started {
+        action: String,
+        model: String,
+    },
+    Delta {
+        text: String,
+    },
+    Done {
+        text: String,
+        usage: Usage,
+        latency_ms: u64,
+    },
+    Cancelled,
+    Error {
+        code: ErrorCode,
+        message: String,
+        retryable: bool,
+    },
+}
+
+pub fn parse_request(line: &str) -> Result<Request, (String, EngineError)> {
+    let value: serde_json::Value = serde_json::from_str(line).map_err(|_| {
+        (
+            String::new(),
+            EngineError::BadRequest("malformed JSON line".into()),
+        )
+    })?;
+
+    let id = value
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    if id.is_empty() {
+        return Err((
+            String::new(),
+            EngineError::BadRequest("missing or empty request id".into()),
+        ));
+    }
+
+    let req_type = value
+        .get("type")
+        .and_then(|v| v.as_str())
+        .map(str::to_owned);
+    if req_type.is_none() {
+        return Err((id, EngineError::BadRequest("missing request type".into())));
+    }
+
+    serde_json::from_value::<Request>(value).map_err(|_| {
+        let msg = match req_type.as_deref() {
+            Some(
+                "health" | "actions.list" | "config.get" | "config.set" | "actions.run" | "cancel"
+                | "shutdown",
+            ) => "invalid request fields".into(),
+            Some(t) => format!("unknown request type: {t}"),
+            None => "missing request type".into(),
+        };
+        (id, EngineError::BadRequest(msg))
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn round_trips_all_protocol_requests() {
+        let cases = [
+            r#"{"id":"r1","type":"health"}"#,
+            r#"{"id":"r2","type":"actions.list"}"#,
+            r#"{"id":"r3","type":"config.get"}"#,
+            r#"{"id":"r4","type":"config.set","patch":{"model":"gpt-5-mini"}}"#,
+            r#"{"id":"r5","type":"actions.run","action":"proofread","text":"their going"}"#,
+            r#"{"id":"r6","type":"actions.run","action":"rewrite","text":"hi","options":{"tone":"professional"}}"#,
+            r#"{"id":"r7","type":"actions.run","action":"translate","text":"hi","options":{"target_lang":"German"}}"#,
+            r#"{"id":"r8","type":"actions.run","action":"compose","text":"","options":{"brief":"Decline","context":"Email"}}"#,
+            r#"{"id":"r9","type":"cancel","target":"r5"}"#,
+            r#"{"id":"r10","type":"shutdown"}"#,
+        ];
+        for line in cases {
+            let req = parse_request(line).unwrap();
+            let round: Request =
+                serde_json::from_str(&serde_json::to_string(&req).unwrap()).unwrap();
+            assert_eq!(req, round);
+        }
+    }
+
+    #[test]
+    fn serializes_events_and_rejects_bad_lines() {
+        let health = serde_json::to_value(Event::new(
+            "a".into(),
+            EventKind::Health {
+                version: ENGINE_VERSION.into(),
+                protocol: PROTOCOL_VERSION,
+            },
+        ))
+        .unwrap();
+        assert_eq!(health["event"], "health");
+        assert_eq!(health["protocol"], 1);
+
+        let err = serde_json::to_value(EngineError::MissingKey.to_event("r5".into())).unwrap();
+        assert_eq!(err["code"], "missing_key");
+        assert_eq!(err["retryable"], false);
+
+        assert_eq!(
+            parse_request("{bad").unwrap_err().1.code(),
+            ErrorCode::BadRequest
+        );
+        let (id, e) = parse_request(r#"{"id":"x1","type":"nope"}"#).unwrap_err();
+        assert_eq!((id.as_str(), e.code()), ("x1", ErrorCode::BadRequest));
+    }
+}

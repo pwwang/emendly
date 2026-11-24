@@ -1,0 +1,6 @@
+name = "rewrite"
+description = "Rewrite text in the requested tone while preserving its meaning."
+requires_text = true
+max_tokens = 2048
+system_prompt = "Rewrite the user's text in the requested tone while preserving its core meaning. Return only the rewritten text, with no preamble, quotes, or explanation."
+user_template = "Tone: {{tone}}\n\nText:\n{{text}}"

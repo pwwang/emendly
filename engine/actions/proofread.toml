@@ -1,0 +1,6 @@
+name = "proofread"
+description = "Fix spelling, grammar, and punctuation without changing meaning or tone."
+requires_text = true
+max_tokens = 2048
+system_prompt = "Fix spelling, grammar, and punctuation errors in the user's text. Preserve meaning, tone, and formatting. Return only the corrected text, with no preamble, quotes, or explanation."
+user_template = "{{text}}"
