@@ -647,8 +647,6 @@
               Visibility="Collapsed">
         <ComboBox x:Name="LanguageDropdown"
                   Width="220"
-                  IsEditable="False"
-                  IsTextSearchEnabled="True"
                   Style="{StaticResource LanguageDropdownStyle}"
                   DropDownClosed="OnLanguageDropdownClosed"
                   PreviewMouseLeftButtonUp="OnLanguageDropdownPreviewMouseLeftButtonUp" />

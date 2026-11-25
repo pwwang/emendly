@@ -68,8 +68,8 @@
     <Setter Property="FontSize" Value="12" />
     <Setter Property="Padding" Value="8,6" />
     <Setter Property="MaxDropDownHeight" Value="260" />
-    <Setter Property="IsEditable" Value="False" />
-    <Setter Property="IsTextSearchEnabled" Value="True" />
+    <Setter Property="IsEditable" Value="True" />
+    <Setter Property="IsTextSearchEnabled" Value="False" />
     <Setter Property="Cursor" Value="Hand" />
     <Setter Property="FocusVisualStyle" Value="{x:Null}" />
     <Setter Property="SnapsToDevicePixels" Value="True" />
@@ -89,30 +89,50 @@
                   <ColumnDefinition Width="*" />
                   <ColumnDefinition Width="26" />
                 </Grid.ColumnDefinitions>
-                <ToggleButton Grid.ColumnSpan="2"
+                <TextBox x:Name="PART_EditableTextBox"
+                         Grid.Column="0"
+                         Style="{x:Null}"
+                         Background="Transparent"
+                         Foreground="{TemplateBinding Foreground}"
+                         CaretBrush="#F3F4F6"
+                         SelectionBrush="#3B82F6"
+                         BorderThickness="0"
+                         Padding="0"
+                         Margin="{TemplateBinding Padding}"
+                         VerticalAlignment="Center"
+                         VerticalContentAlignment="Center"
+                         HorizontalAlignment="Stretch"
+                         Cursor="IBeam"
+                         FocusVisualStyle="{x:Null}"
+                         IsReadOnly="{TemplateBinding IsReadOnly}"
+                         Visibility="Collapsed" />
+                <TextBlock x:Name="Watermark"
+                           Grid.Column="0"
+                           Text="Type or choose a language"
+                           Foreground="#9CA3AF"
+                           Margin="{TemplateBinding Padding}"
+                           VerticalAlignment="Center"
+                           HorizontalAlignment="Stretch"
+                           TextTrimming="CharacterEllipsis"
+                           IsHitTestVisible="False"
+                           Visibility="Collapsed" />
+                <ToggleButton x:Name="DropDownToggle"
+                              Grid.Column="1"
                               Focusable="False"
                               ClickMode="Press"
+                              Cursor="Hand"
                               IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
                   <ToggleButton.Template>
                     <ControlTemplate TargetType="ToggleButton">
-                      <Border Background="Transparent" />
+                      <Border Background="Transparent">
+                        <Path Data="M 0 0 L 4 4 L 8 0 Z"
+                              Fill="#9CA3AF"
+                              HorizontalAlignment="Center"
+                              VerticalAlignment="Center" />
+                      </Border>
                     </ControlTemplate>
                   </ToggleButton.Template>
                 </ToggleButton>
-                <ContentPresenter Grid.Column="0"
-                                  IsHitTestVisible="False"
-                                  Content="{TemplateBinding SelectionBoxItem}"
-                                  ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
-                                  ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"
-                                  Margin="{TemplateBinding Padding}"
-                                  VerticalAlignment="Center"
-                                  HorizontalAlignment="Left" />
-                <Path Grid.Column="1"
-                      IsHitTestVisible="False"
-                      Data="M 0 0 L 4 4 L 8 0 Z"
-                      Fill="#9CA3AF"
-                      HorizontalAlignment="Center"
-                      VerticalAlignment="Center" />
               </Grid>
             </Border>
             <Popup x:Name="PART_Popup"
@@ -141,6 +161,12 @@
             </Popup>
           </Grid>
           <ControlTemplate.Triggers>
+            <Trigger Property="IsEditable" Value="True">
+              <Setter TargetName="PART_EditableTextBox" Property="Visibility" Value="Visible" />
+            </Trigger>
+            <DataTrigger Binding="{Binding Text, RelativeSource={RelativeSource TemplatedParent}}" Value="">
+              <Setter TargetName="Watermark" Property="Visibility" Value="Visible" />
+            </DataTrigger>
             <Trigger Property="IsMouseOver" Value="True">
               <Setter TargetName="ComboBorder" Property="BorderBrush" Value="#4E5873" />
             </Trigger>

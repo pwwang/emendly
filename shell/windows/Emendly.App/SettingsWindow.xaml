@@ -209,9 +209,8 @@
     <ComboBox x:Name="DefaultLanguageCombo"
               Width="220"
               HorizontalAlignment="Left"
-              IsEditable="False"
-              IsTextSearchEnabled="True"
-              Style="{StaticResource LanguageDropdownStyle}" />
+              Style="{StaticResource LanguageDropdownStyle}"
+              DropDownOpened="OnLanguageDropdownOpened" />
 
     <TextBlock Text="Base URL" Foreground="#D1D5DB" Margin="0,12,0,4" />
     <TextBox x:Name="BaseUrlBox"

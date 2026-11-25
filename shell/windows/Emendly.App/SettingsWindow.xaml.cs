@@ -16,6 +16,7 @@ public partial class SettingsWindow : Window
 
     private string _pendingHotkey;
     private bool _capturingHotkey;
+    private string _languageAtOpen = LanguageSettings.DefaultTargetLanguage;
 
     public SettingsWindow(
         AppSettings current,
@@ -42,7 +43,9 @@ public partial class SettingsWindow : Window
 
         var languages = MenuModel.GetLanguages(_originalLanguage);
         DefaultLanguageCombo.ItemsSource = languages;
+        DefaultLanguageCombo.Text = _originalLanguage;
         DefaultLanguageCombo.SelectedIndex = MenuModel.FindLanguageIndex(languages, _originalLanguage);
+        _languageAtOpen = _originalLanguage;
 
         BaseUrlBox.Text = current.BaseUrl;
         ModelBox.Text = current.Model;
@@ -160,7 +163,46 @@ public partial class SettingsWindow : Window
         if (_capturingHotkey)
         {
             HandleHotkeyCaptureKey(e);
+            return;
         }
+
+        if (DefaultLanguageCombo.IsDropDownOpen)
+        {
+            HandleLanguageDropdownKey(e);
+            return;
+        }
+
+        if (e.Key == Key.Enter && DefaultLanguageCombo.IsKeyboardFocusWithin)
+        {
+            e.Handled = true;
+            OnSaveClick(this, new RoutedEventArgs());
+        }
+    }
+
+    private void OnLanguageDropdownOpened(object? sender, EventArgs e)
+    {
+        _languageAtOpen = DefaultLanguageCombo.Text ?? _originalLanguage;
+    }
+
+    private void HandleLanguageDropdownKey(KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape)
+        {
+            e.Handled = true;
+            DefaultLanguageCombo.Text = _languageAtOpen;
+            DefaultLanguageCombo.IsDropDownOpen = false;
+            return;
+        }
+
+        if (e.Key != Key.Enter)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        var chosen = LanguagePicker.Resolve(DefaultLanguageCombo, _languageAtOpen);
+        DefaultLanguageCombo.Text = chosen ?? _languageAtOpen;
+        DefaultLanguageCombo.IsDropDownOpen = false;
     }
 
     private void HandleHotkeyCaptureKey(KeyEventArgs e)
@@ -249,7 +291,7 @@ public partial class SettingsWindow : Window
             ShellLogger.LogHotkey(effectiveHotkey);
         }
 
-        var selectedLanguage = (DefaultLanguageCombo.SelectedItem as string)?.Trim();
+        var selectedLanguage = DefaultLanguageCombo.Text?.Trim();
         if (string.IsNullOrEmpty(selectedLanguage))
         {
             selectedLanguage = LanguageSettings.DefaultTargetLanguage;

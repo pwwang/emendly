@@ -1038,6 +1038,7 @@ public partial class PanelWindow : Window
 
         var languages = MenuModel.GetLanguages(_targetLanguage);
         LanguageDropdown.ItemsSource = languages;
+        LanguageDropdown.Text = _targetLanguage;
         LanguageDropdown.SelectedIndex = MenuModel.FindLanguageIndex(languages, _targetLanguage);
 
         _languageDropdownOpen = true;
@@ -1058,6 +1059,10 @@ public partial class PanelWindow : Window
             LanguageDropdown.Focus();
             Keyboard.Focus(LanguageDropdown);
             LanguageDropdown.IsDropDownOpen = true;
+            if (LanguageDropdown.Template.FindName("PART_EditableTextBox", LanguageDropdown) is TextBox editor)
+            {
+                editor.SelectAll();
+            }
         }, DispatcherPriority.Input);
     }
 
@@ -1093,7 +1098,7 @@ public partial class PanelWindow : Window
         Canvas.SetTop(LanguageDropdown, top);
     }
 
-    private void CloseLanguageDropdown(bool commit)
+    private void CloseLanguageDropdown(bool commit, string? value = null)
     {
         if (!_languageDropdownOpen)
         {
@@ -1104,7 +1109,9 @@ public partial class PanelWindow : Window
         var shouldCommit = commit;
         _languageDropdownCommitted = false;
 
-        var chosen = shouldCommit ? (LanguageDropdown.SelectedItem as string)?.Trim() : null;
+        var chosen = shouldCommit
+            ? (value ?? (LanguageDropdown.SelectedItem as string) ?? LanguageDropdown.Text)?.Trim()
+            : null;
 
         if (LanguageDropdown.IsDropDownOpen)
         {
@@ -2041,15 +2048,14 @@ public partial class PanelWindow : Window
             return;
         }
 
-        if (e.Key == Key.Enter)
+        if (e.Key != Key.Enter)
         {
-            _languageDropdownCommitted = true;
-            if (!LanguageDropdown.IsDropDownOpen)
-            {
-                e.Handled = true;
-                CloseLanguageDropdown(commit: true);
-            }
+            return;
         }
+
+        e.Handled = true;
+        var chosen = LanguagePicker.Resolve(LanguageDropdown, _targetLanguage);
+        CloseLanguageDropdown(commit: chosen is not null, value: chosen);
     }
 
     private static int DigitFromKey(Key key) =>
