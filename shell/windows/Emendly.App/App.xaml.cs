@@ -180,22 +180,33 @@ public partial class App : Application
             switch (snapshot.Report.Verdict)
             {
                 case "selection":
-                    OpenPanel(foreground, PanelMode.Selection, snapshot);
-                    break;
-
                 case "caret":
-                    OpenPanel(foreground, PanelMode.Compose, snapshot);
+                    var writableClassification = SelectionClassifier.Classify(snapshot.SelectedText, readOnly: false);
+                    OpenPanel(foreground, writableClassification, snapshot, unsupportedReason: null);
                     break;
 
                 case "read_only":
-                    var reason = snapshot.Report.Enabled
-                        ? "Focused text field is read-only."
-                        : "Focused text field is disabled.";
-                    ShowNotice(foreground.ProcessName, reason, snapshot.CaretLocation);
+                    var readOnlyClassification = SelectionClassifier.Classify(snapshot.SelectedText, readOnly: true);
+                    if (readOnlyClassification.State == SelectionState.Empty)
+                    {
+                        var reason = snapshot.Report.Enabled
+                            ? "Focused text field is read-only."
+                            : "Focused text field is disabled.";
+                        OpenPanel(foreground, readOnlyClassification, snapshot, unsupportedReason: reason);
+                    }
+                    else
+                    {
+                        OpenPanel(foreground, readOnlyClassification, snapshot, unsupportedReason: null);
+                    }
                     break;
 
                 default:
-                    ShowNotice(foreground.ProcessName, "No supported editable text field found.", snapshot.CaretLocation);
+                    var unsupportedClassification = SelectionClassifier.Classify(string.Empty, readOnly: true);
+                    OpenPanel(
+                        foreground,
+                        unsupportedClassification,
+                        snapshot,
+                        unsupportedReason: "No supported editable text field found.");
                     break;
             }
         }
@@ -205,7 +216,11 @@ public partial class App : Application
         }
     }
 
-    private void OpenPanel(WindowInfo targetWindow, PanelMode mode, CaptureSnapshot snapshot)
+    private void OpenPanel(
+        WindowInfo targetWindow,
+        SelectionClassification classification,
+        CaptureSnapshot snapshot,
+        string? unsupportedReason)
     {
         if (_transformer is null)
         {
@@ -223,12 +238,13 @@ public partial class App : Application
 
         var panel = new PanelWindow(
             targetWindow: targetWindow,
-            mode: mode,
-            selectedText: snapshot.SelectedText,
-            fieldContext: snapshot.FieldContext,
+            classification: classification,
+            surroundingContext: snapshot.SurroundingContext,
             caretLocation: snapshot.CaretLocation,
+            settings: _settings,
             transformer: _transformer,
-            inserter: _inserter);
+            inserter: _inserter,
+            unsupportedReason: unsupportedReason);
 
         panel.PasteCompleted += (_, _) => UpdateUndoMenuItem();
         panel.ActivationFailed += (_, _) => ShowNotice(

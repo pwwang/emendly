@@ -16,6 +16,8 @@ public sealed class EchoTransformer : ITransformer
 
     public string StatusSummary => "Echo mode (engine binary not found)";
 
+    public string? DefaultTargetLanguage => null;
+
     public Task ConfigureAsync(string baseUrl, string model, CancellationToken cancellationToken = default) =>
         Task.CompletedTask;
 
@@ -28,9 +30,17 @@ public sealed class EchoTransformer : ITransformer
 
         var source = !string.IsNullOrEmpty(request.Text)
             ? request.Text
-            : request.Options is not null && request.Options.TryGetValue("brief", out var brief) && !string.IsNullOrEmpty(brief)
+            : request.Options is not null
+                && request.Options.TryGetValue("brief", out var briefObj)
+                && briefObj is string brief
+                && !string.IsNullOrEmpty(brief)
                 ? brief
-                : "(empty)";
+                : request.Options is not null
+                    && request.Options.TryGetValue("instruction", out var instrObj)
+                    && instrObj is string instruction
+                    && !string.IsNullOrEmpty(instruction)
+                    ? instruction
+                    : "(empty)";
 
         var result = $"[{request.Action.ToUpperInvariant()}] {source.ToUpperInvariant()}";
 

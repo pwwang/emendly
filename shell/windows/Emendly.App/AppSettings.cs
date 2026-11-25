@@ -1,10 +1,19 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Emendly.App;
+
+public sealed class LanguageSettings
+{
+    public const string DefaultTargetLanguage = "German";
+
+    [JsonPropertyName("default_target")]
+    public string DefaultTarget { get; set; } = DefaultTargetLanguage;
+}
 
 public sealed class AppSettings
 {
@@ -20,6 +29,16 @@ public sealed class AppSettings
 
     [JsonPropertyName("hotkey")]
     public string Hotkey { get; set; } = DefaultHotkey;
+
+    [JsonPropertyName("language")]
+    public LanguageSettings Language { get; set; } = new();
+
+    [JsonPropertyName("target_language")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TargetLanguage { get; set; }
+
+    [JsonPropertyName("context_enabled")]
+    public Dictionary<string, bool> ContextEnabled { get; set; } = new(StringComparer.Ordinal);
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -56,12 +75,60 @@ public sealed class AppSettings
             parsed.BaseUrl = string.IsNullOrWhiteSpace(parsed.BaseUrl) ? DefaultBaseUrl : parsed.BaseUrl.Trim();
             parsed.Model = string.IsNullOrWhiteSpace(parsed.Model) ? DefaultModel : parsed.Model.Trim();
             parsed.Hotkey = string.IsNullOrWhiteSpace(parsed.Hotkey) ? DefaultHotkey : parsed.Hotkey.Trim();
+            parsed.Language ??= new LanguageSettings();
+            parsed.Language.DefaultTarget = string.IsNullOrWhiteSpace(parsed.Language.DefaultTarget)
+                ? LanguageSettings.DefaultTargetLanguage
+                : parsed.Language.DefaultTarget.Trim();
+            parsed.TargetLanguage = string.IsNullOrWhiteSpace(parsed.TargetLanguage)
+                ? null
+                : parsed.TargetLanguage.Trim();
+            parsed.ContextEnabled = parsed.ContextEnabled is not null
+                ? new Dictionary<string, bool>(parsed.ContextEnabled, StringComparer.Ordinal)
+                : new Dictionary<string, bool>(StringComparer.Ordinal);
             return parsed;
         }
         catch (Exception)
         {
             return new AppSettings();
         }
+    }
+
+    public bool GetContextEnabled(string actionId) =>
+        !ContextEnabled.TryGetValue(actionId, out var enabled) || enabled;
+
+    public void SetContextEnabled(string actionId, bool enabled)
+    {
+        ContextEnabled[actionId] = enabled;
+        Save();
+    }
+
+    public string GetEffectiveTargetLanguage(string? engineDefaultTarget)
+    {
+        if (!string.IsNullOrWhiteSpace(TargetLanguage))
+        {
+            return TargetLanguage;
+        }
+
+        if (!string.IsNullOrWhiteSpace(engineDefaultTarget))
+        {
+            return engineDefaultTarget.Trim();
+        }
+
+        return string.IsNullOrWhiteSpace(Language.DefaultTarget)
+            ? LanguageSettings.DefaultTargetLanguage
+            : Language.DefaultTarget;
+    }
+
+    public void SetTargetLanguage(string language)
+    {
+        var trimmed = language.Trim();
+        if (string.IsNullOrEmpty(trimmed))
+        {
+            return;
+        }
+
+        TargetLanguage = trimmed;
+        Save();
     }
 
     public void Save()
@@ -72,7 +139,7 @@ public sealed class AppSettings
             Directory.CreateDirectory(dir);
         }
 
-        // Only base_url, model, and hotkey are serialized; API keys never touch disk.
+        // Only non-secret settings are serialized; API keys never touch disk.
         var json = JsonSerializer.Serialize(this, JsonOptions);
         File.WriteAllText(UserSettingsPath, json);
     }
@@ -222,6 +289,33 @@ public static class ShellLogger
             ts = DateTimeOffset.UtcNow.ToString("O"),
             @event = "focus",
             target = targetProcess,
+        });
+
+        Append(record);
+    }
+
+    public static void LogMenu(string state, int items)
+    {
+        var record = JsonSerializer.Serialize(new
+        {
+            ts = DateTimeOffset.UtcNow.ToString("O"),
+            @event = "menu",
+            state,
+            items,
+        });
+
+        Append(record);
+    }
+
+    public static void LogActionOptions(string action, string processName, string options)
+    {
+        var record = JsonSerializer.Serialize(new
+        {
+            ts = DateTimeOffset.UtcNow.ToString("O"),
+            @event = "action",
+            action,
+            app = processName,
+            options,
         });
 
         Append(record);

@@ -16,7 +16,8 @@ public sealed record CaptureSnapshot(
     ProbeReport Report,
     string SelectedText,
     string FieldContext,
-    CaretLocation CaretLocation);
+    CaretLocation CaretLocation,
+    SurroundingContext? SurroundingContext = null);
 
 public sealed record CaptureOutcome(CaptureSnapshot? Snapshot, bool TimedOut, string? ErrorMessage)
 {
@@ -161,11 +162,16 @@ public static class UiaProbe
             ? ExtractSurroundingContext(fieldText ?? string.Empty, caret.Offset)
             : string.Empty;
 
+        var surroundingContext = includeTextDetails
+            ? ContextReader.Read(primarySelection, docRange)
+            : null;
+
         return new CaptureSnapshot(
             Report: report,
             SelectedText: includeTextDetails ? selectedText : string.Empty,
             FieldContext: fieldContext,
-            CaretLocation: caretLocation);
+            CaretLocation: caretLocation,
+            SurroundingContext: surroundingContext);
     }
 
     private static CaptureSnapshot UnsupportedSnapshot(WindowInfo window, bool includeTextDetails) =>

@@ -10,7 +10,7 @@ public sealed record TransformRequest(
     string Text,
     string? Context = null,
     string? AppProcess = null,
-    IReadOnlyDictionary<string, string>? Options = null);
+    IReadOnlyDictionary<string, object>? Options = null);
 
 public sealed record TransformResult(
     string Text,
@@ -36,6 +36,7 @@ public interface ITransformer : IAsyncDisposable
     string ModeName { get; }
     bool IsEchoFallback { get; }
     string StatusSummary { get; }
+    string? DefaultTargetLanguage { get; }
 
     Task ConfigureAsync(string baseUrl, string model, CancellationToken cancellationToken = default);
 

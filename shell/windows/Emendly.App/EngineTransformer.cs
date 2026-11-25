@@ -22,6 +22,7 @@ public sealed class EngineTransformer : ITransformer
 
     private string _baseUrl;
     private string _model;
+    private string? _defaultTargetLanguage;
     private string? _spawnedApiKey;
     private long _nextRequestId;
     private Process? _process;
@@ -42,6 +43,8 @@ public sealed class EngineTransformer : ITransformer
     public bool IsEchoFallback => false;
 
     public string StatusSummary => $"Engine ({Path.GetFileName(_enginePath)})";
+
+    public string? DefaultTargetLanguage => _defaultTargetLanguage;
 
     public async Task ConfigureAsync(string baseUrl, string model, CancellationToken cancellationToken = default)
     {
@@ -310,6 +313,18 @@ public sealed class EngineTransformer : ITransformer
                     break;
 
                 case "config":
+                    if (root.TryGetProperty("config", out var cfgEl)
+                        && cfgEl.ValueKind == JsonValueKind.Object
+                        && cfgEl.TryGetProperty("language", out var langEl)
+                        && langEl.ValueKind == JsonValueKind.Object
+                        && langEl.TryGetProperty("default_target", out var targetEl))
+                    {
+                        var target = targetEl.GetString();
+                        if (!string.IsNullOrWhiteSpace(target))
+                        {
+                            _defaultTargetLanguage = target.Trim();
+                        }
+                    }
                     pending.ConfigTcs?.TrySetResult(true);
                     break;
 
@@ -582,7 +597,26 @@ public sealed class EngineTransformer : ITransformer
                 writer.WriteStartObject("options");
                 foreach (var pair in request.Options)
                 {
-                    writer.WriteString(pair.Key, pair.Value);
+                    switch (pair.Value)
+                    {
+                        case bool b:
+                            writer.WriteBoolean(pair.Key, b);
+                            break;
+                        case int i:
+                            writer.WriteNumber(pair.Key, i);
+                            break;
+                        case long l:
+                            writer.WriteNumber(pair.Key, l);
+                            break;
+                        case string s:
+                            writer.WriteString(pair.Key, s);
+                            break;
+                        case null:
+                            break;
+                        default:
+                            writer.WriteString(pair.Key, pair.Value.ToString());
+                            break;
+                    }
                 }
 
                 writer.WriteEndObject();

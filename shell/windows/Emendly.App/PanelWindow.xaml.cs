@@ -13,33 +13,19 @@ using Emendly.Capture;
 
 namespace Emendly.App;
 
-public enum PanelMode
-{
-    Selection,
-    Compose,
-}
-
 public partial class PanelWindow : Window
 {
     private enum PanelStage
     {
+        Unsupported,
         ChooseAction,
-        ComposePrompt,
+        PromptInput,
         Streaming,
         PreviewReady,
         ErrorOrCancelled,
     }
 
-    private sealed record ActionItem(int Number, string Id, string Label, string Description);
-
-    private static readonly ActionItem[] Actions =
-    {
-        new(1, "proofread", "Proofread", "Fix spelling, grammar, and punctuation"),
-        new(2, "rewrite", "Rewrite", "Improve clarity and flow"),
-        new(3, "compose", "Compose", "Draft new text from a brief"),
-        new(4, "translate", "Translate", "Translate to target language"),
-        new(5, "synonyms", "Synonyms", "Suggest concise alternatives"),
-    };
+    private const int MaxSelectionCharacters = 4000;
 
     private static readonly Brush RowNormalBg = Brushes.Transparent;
     private static readonly Brush RowSelectedBg = new SolidColorBrush(Color.FromRgb(0x2A, 0x33, 0x47));
@@ -48,20 +34,35 @@ public partial class PanelWindow : Window
     private static readonly Brush BadgeText = new SolidColorBrush(Color.FromRgb(0x93, 0xC5, 0xFD));
     private static readonly Brush LabelText = new SolidColorBrush(Color.FromRgb(0xF3, 0xF4, 0xF6));
     private static readonly Brush DescText = new SolidColorBrush(Color.FromRgb(0x9C, 0xA3, 0xAF));
+    private static readonly Brush GroupHeaderText = new SolidColorBrush(Color.FromRgb(0x6B, 0x72, 0x80));
 
     private readonly WindowInfo _targetWindow;
     private readonly IntPtr _targetHwnd;
-    private readonly PanelMode _mode;
-    private readonly string _selectedText;
-    private readonly string _fieldContext;
+    private readonly SelectionClassification _classification;
+    private readonly SurroundingContext? _surroundingContext;
     private readonly CaretLocation _caretLocation;
+    private readonly AppSettings _settings;
     private readonly ITransformer _transformer;
     private readonly ClipboardInserter _inserter;
-    private readonly Border[] _actionRows = new Border[Actions.Length];
+    private readonly List<MenuAction> _visibleActions = new();
+    private readonly List<Border> _actionRows = new();
 
-    private PanelStage _stage;
+    private PanelStage _stage = PanelStage.ChooseAction;
+    private bool _expanded;
+    private string _filter = string.Empty;
     private int _selectedIndex;
+    private bool _optionsFocused;
+    private bool _contextPreviewExpanded;
+    private MenuAction? _highlighted;
+    private string _targetLanguage = LanguageSettings.DefaultTargetLanguage;
+    private bool _languagePickerOpen;
+    private bool _updatingLanguageList;
+    private string? _promptActionId;
+    private string? _lastPromptActionId;
+    private bool _promptForceOptionsOff;
     private string _activeAction = string.Empty;
+    private ActionKind _activeKind;
+    private bool _activeReadOnly;
     private string _resultText = string.Empty;
     private CancellationTokenSource? _requestCts;
     private bool _applying;
@@ -74,49 +75,39 @@ public partial class PanelWindow : Window
 
     public PanelWindow(
         WindowInfo targetWindow,
-        PanelMode mode,
-        string selectedText,
-        string fieldContext,
+        SelectionClassification classification,
+        SurroundingContext? surroundingContext,
         CaretLocation caretLocation,
+        AppSettings settings,
         ITransformer transformer,
-        ClipboardInserter inserter)
+        ClipboardInserter inserter,
+        string? unsupportedReason)
     {
         InitializeComponent();
 
         _targetWindow = targetWindow;
         _targetHwnd = targetWindow.Hwnd;
-        _mode = mode;
-        _selectedText = selectedText;
-        _fieldContext = fieldContext;
+        _classification = classification;
+        _surroundingContext = surroundingContext;
         _caretLocation = caretLocation;
+        _settings = settings;
         _transformer = transformer;
         _inserter = inserter;
-
-        var appLabel = string.IsNullOrWhiteSpace(targetWindow.ProcessName) ? "window" : targetWindow.ProcessName;
-        HeaderMetaText.Text = mode == PanelMode.Selection
-            ? $"· {appLabel} · {selectedText.Length} chars"
-            : $"· {appLabel} · compose";
+        _targetLanguage = settings.GetEffectiveTargetLanguage(transformer.DefaultTargetLanguage);
 
         ModeBadgeText.Text = transformer.ModeName;
 
-        if (!string.IsNullOrWhiteSpace(fieldContext))
+        if (!string.IsNullOrWhiteSpace(unsupportedReason))
         {
-            UseContextCheckBox.Content = $"Include surrounding text from {appLabel} ({fieldContext.Length} chars)";
-            UseContextCheckBox.Visibility = Visibility.Visible;
-        }
-
-        BuildActionRows();
-
-        if (mode == PanelMode.Selection)
-        {
-            SetStage(PanelStage.ChooseAction);
+            ShowUnsupported(unsupportedReason);
         }
         else
         {
-            SetStage(PanelStage.ComposePrompt);
+            SetStage(PanelStage.ChooseAction);
+            BuildMenu(resetSelection: true);
         }
 
-        PositionNearCaret(estimatedHeight: mode == PanelMode.Selection ? 260 : 180);
+        PositionNearCaret(estimatedHeight: 420);
     }
 
     public void ShowAndActivate()
@@ -133,6 +124,16 @@ public partial class PanelWindow : Window
 
         TakeKeyboardFocus();
         _ = ConfirmKeyboardFocusAsync();
+    }
+
+    private void ShowUnsupported(string reason)
+    {
+        UnsupportedReasonText.Text = reason;
+        SetStage(PanelStage.Unsupported);
+        ModeLineText.Text = string.IsNullOrWhiteSpace(_targetWindow.ProcessName)
+            ? "Emendly"
+            : $"Emendly · {_targetWindow.ProcessName}";
+        ShellLogger.LogMenu("unsupported", 0);
     }
 
     private void TakeKeyboardFocus()
@@ -155,16 +156,51 @@ public partial class PanelWindow : Window
 
     private void FocusStageTarget()
     {
+        if (_closing || !IsVisible)
+        {
+            return;
+        }
+
+        if (_languagePickerOpen)
+        {
+            LanguageSearchBox.Focus();
+            Keyboard.Focus(LanguageSearchBox);
+            return;
+        }
+
         switch (_stage)
         {
-            case PanelStage.ComposePrompt:
-                BriefBox.Focus();
-                Keyboard.Focus(BriefBox);
+            case PanelStage.PromptInput:
+                if (_optionsFocused
+                    && _promptActionId == "compose"
+                    && PromptContextChipButton.IsEnabled)
+                {
+                    PromptContextChipButton.Focus();
+                    Keyboard.Focus(PromptContextChipButton);
+                }
+                else
+                {
+                    PromptInputBox.Focus();
+                    Keyboard.Focus(PromptInputBox);
+                }
                 break;
 
             case PanelStage.ChooseAction:
-                ActionListPanel.Focus();
-                Keyboard.Focus(ActionListPanel);
+                if (_optionsFocused && ContextChipButton.Visibility == Visibility.Visible && ContextChipButton.IsEnabled)
+                {
+                    ContextChipButton.Focus();
+                    Keyboard.Focus(ContextChipButton);
+                }
+                else if (_optionsFocused && LanguageChipButton.Visibility == Visibility.Visible)
+                {
+                    LanguageChipButton.Focus();
+                    Keyboard.Focus(LanguageChipButton);
+                }
+                else
+                {
+                    ActionListPanel.Focus();
+                    Keyboard.Focus(ActionListPanel);
+                }
                 break;
 
             case PanelStage.Streaming:
@@ -230,127 +266,48 @@ public partial class PanelWindow : Window
         }
     }
 
-    private void BuildActionRows()
-    {
-        ActionListPanel.Children.Clear();
-
-        for (var i = 0; i < Actions.Length; i++)
-        {
-            var index = i;
-            var item = Actions[i];
-
-            var numberBadge = new Border
-            {
-                Background = BadgeBg,
-                CornerRadius = new CornerRadius(4),
-                Width = 22,
-                Height = 22,
-                Margin = new Thickness(0, 0, 10, 0),
-                VerticalAlignment = VerticalAlignment.Center,
-                Child = new TextBlock
-                {
-                    Text = item.Number.ToString(),
-                    Foreground = BadgeText,
-                    FontSize = 11,
-                    FontWeight = FontWeights.SemiBold,
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                    VerticalAlignment = VerticalAlignment.Center,
-                },
-            };
-
-            var labelStack = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-            labelStack.Children.Add(new TextBlock
-            {
-                Text = item.Label,
-                Foreground = LabelText,
-                FontWeight = FontWeights.Medium,
-                FontSize = 13,
-            });
-            labelStack.Children.Add(new TextBlock
-            {
-                Text = item.Description,
-                Foreground = DescText,
-                FontSize = 11,
-            });
-
-            var grid = new Grid();
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            grid.Children.Add(numberBadge);
-            Grid.SetColumn(labelStack, 1);
-            grid.Children.Add(labelStack);
-
-            var row = new Border
-            {
-                CornerRadius = new CornerRadius(6),
-                BorderThickness = new Thickness(2, 0, 0, 0),
-                BorderBrush = Brushes.Transparent,
-                Background = RowNormalBg,
-                Padding = new Thickness(8, 6, 8, 6),
-                Margin = new Thickness(0, 1, 0, 1),
-                Cursor = Cursors.Hand,
-                Child = grid,
-            };
-
-            row.MouseEnter += (_, _) => SelectActionIndex(index);
-            row.MouseLeftButtonUp += (_, _) => TriggerAction(index);
-
-            _actionRows[i] = row;
-            ActionListPanel.Children.Add(row);
-        }
-
-        SelectActionIndex(0);
-    }
-
-    private void SelectActionIndex(int index)
-    {
-        _selectedIndex = (index + Actions.Length) % Actions.Length;
-        for (var i = 0; i < _actionRows.Length; i++)
-        {
-            var isSelected = i == _selectedIndex;
-            _actionRows[i].Background = isSelected ? RowSelectedBg : RowNormalBg;
-            _actionRows[i].BorderBrush = isSelected ? RowSelectedBorder : Brushes.Transparent;
-        }
-    }
-
     private void SetStage(PanelStage stage)
     {
         _stage = stage;
 
-        ActionPanel.Visibility = stage == PanelStage.ChooseAction ? Visibility.Visible : Visibility.Collapsed;
-        ComposePanel.Visibility = stage == PanelStage.ComposePrompt ? Visibility.Visible : Visibility.Collapsed;
-        PreviewPanel.Visibility = stage is PanelStage.Streaming or PanelStage.PreviewReady or PanelStage.ErrorOrCancelled
+        UnsupportedPanel.Visibility = stage == PanelStage.Unsupported ? Visibility.Visible : Visibility.Collapsed;
+        MenuPanel.Visibility = stage == PanelStage.ChooseAction ? Visibility.Visible : Visibility.Collapsed;
+        PromptPanel.Visibility = stage == PanelStage.PromptInput ? Visibility.Visible : Visibility.Collapsed;
+
+        var previewVisible = stage is PanelStage.Streaming or PanelStage.PreviewReady or PanelStage.ErrorOrCancelled;
+        PreviewPanel.Visibility = previewVisible ? Visibility.Visible : Visibility.Collapsed;
+
+        LongSelectionBanner.Visibility = stage != PanelStage.Unsupported
+            && _classification.CharacterCount > MaxSelectionCharacters
             ? Visibility.Visible
             : Visibility.Collapsed;
 
         switch (stage)
         {
+            case PanelStage.ChooseAction:
+                UpdateOptionsRow();
+                UpdateMenuHints();
+                break;
+
+            case PanelStage.PromptInput:
+                UpdatePromptOptions();
+                PromptErrorText.Visibility = Visibility.Collapsed;
+                break;
+
             case PanelStage.Streaming:
-                ErrorText.Visibility = Visibility.Collapsed;
-                PreviewStatusText.Text = "Generating...";
-                PreviewHintText.Text = "Esc or hotkey cancels";
-                PrimaryButton.Visibility = Visibility.Collapsed;
-                SecondaryButton.Content = "Cancel";
-                SecondaryButton.Visibility = Visibility.Visible;
+                ConfigureStreamingButtons();
                 break;
 
             case PanelStage.PreviewReady:
-                ErrorText.Visibility = Visibility.Collapsed;
-                PreviewHintText.Text = "Enter applies · Esc discards";
-                PrimaryButton.Content = "Apply";
-                PrimaryButton.Visibility = Visibility.Visible;
-                SecondaryButton.Content = "Discard";
-                SecondaryButton.Visibility = Visibility.Visible;
+                ConfigurePreviewButtons();
                 break;
 
             case PanelStage.ErrorOrCancelled:
-                PreviewHintText.Text = "Enter retries · Esc closes";
-                PrimaryButton.Content = "Back";
-                PrimaryButton.Visibility = Visibility.Visible;
-                SecondaryButton.Content = "Close";
-                SecondaryButton.Visibility = Visibility.Visible;
+                ConfigureErrorButtons();
                 break;
         }
+
+        UpdateModeLine();
 
         _ = Dispatcher.InvokeAsync(() =>
         {
@@ -361,68 +318,790 @@ public partial class PanelWindow : Window
         });
     }
 
-    private void TriggerAction(int index)
-    {
-        SelectActionIndex(index);
-        var item = Actions[_selectedIndex];
+    // ---- Menu construction -------------------------------------------------
 
-        if (item.Id == "compose")
+    private void BuildMenu(bool resetSelection)
+    {
+        ActionListPanel.Children.Clear();
+        _visibleActions.Clear();
+        _actionRows.Clear();
+
+        if (_expanded)
         {
-            SetStage(PanelStage.ComposePrompt);
+            var groups = MenuModel.FilterExpanded(_filter);
+            foreach (var group in groups)
+            {
+                AddGroupHeader(group.Label);
+                foreach (var action in group.Items)
+                {
+                    AddActionRow(action);
+                }
+            }
+
+            if (_visibleActions.Count == 0)
+            {
+                ActionListPanel.Children.Add(new TextBlock
+                {
+                    Text = "No matching actions",
+                    Foreground = DescText,
+                    Margin = new Thickness(8, 12, 0, 0),
+                });
+            }
+        }
+        else
+        {
+            foreach (var action in MenuModel.GetDefault(_classification.State))
+            {
+                AddActionRow(action);
+            }
+
+            AddMoreRow();
+        }
+
+        FilterBar.Visibility = _expanded ? Visibility.Visible : Visibility.Collapsed;
+        FilterText.Text = _filter.Length == 0 ? "Type to filter actions" : _filter;
+
+        if (_visibleActions.Count == 0)
+        {
+            _selectedIndex = -1;
+        }
+        else
+        {
+            if (resetSelection)
+            {
+                _selectedIndex = 0;
+            }
+
+            _selectedIndex = Math.Clamp(_selectedIndex, 0, _visibleActions.Count - 1);
+        }
+
+        _optionsFocused = false;
+        UpdateSelectionVisuals();
+
+        var state = _expanded
+            ? (_filter.Length == 0 ? "expanded" : "filtered")
+            : StateLabelLower(_classification.State);
+        ShellLogger.LogMenu(state, _visibleActions.Count);
+    }
+
+    private void AddGroupHeader(string label)
+    {
+        ActionListPanel.Children.Add(new TextBlock
+        {
+            Text = label.ToUpperInvariant(),
+            Foreground = GroupHeaderText,
+            FontSize = 10.5,
+            FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(8, 8, 0, 2),
+        });
+    }
+
+    private void AddActionRow(MenuAction action)
+    {
+        var index = _visibleActions.Count;
+        var number = index + 1;
+
+        var numberBadge = new Border
+        {
+            Background = BadgeBg,
+            CornerRadius = new CornerRadius(4),
+            Width = 22,
+            Height = 22,
+            Margin = new Thickness(0, 0, 10, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            Child = new TextBlock
+            {
+                Text = number.ToString(),
+                Foreground = BadgeText,
+                FontSize = 11,
+                FontWeight = FontWeights.SemiBold,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+            },
+        };
+
+        var labelStack = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        labelStack.Children.Add(new TextBlock
+        {
+            Text = action.Label,
+            Foreground = LabelText,
+            FontWeight = FontWeights.Medium,
+            FontSize = 13,
+        });
+        labelStack.Children.Add(new TextBlock
+        {
+            Text = action.Description,
+            Foreground = DescText,
+            FontSize = 11,
+        });
+
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.Children.Add(numberBadge);
+        Grid.SetColumn(labelStack, 1);
+        grid.Children.Add(labelStack);
+
+        var row = new Border
+        {
+            CornerRadius = new CornerRadius(6),
+            BorderThickness = new Thickness(2, 0, 0, 0),
+            BorderBrush = Brushes.Transparent,
+            Background = RowNormalBg,
+            Padding = new Thickness(8, 6, 8, 6),
+            Margin = new Thickness(0, 1, 0, 1),
+            Cursor = Cursors.Hand,
+            Child = grid,
+        };
+
+        row.MouseEnter += (_, _) => SelectIndex(index);
+        row.MouseLeftButtonUp += (_, _) =>
+        {
+            SelectIndex(index);
+            TriggerAction(action, forceOptionsOff: false);
+        };
+
+        _visibleActions.Add(action);
+        _actionRows.Add(row);
+        ActionListPanel.Children.Add(row);
+    }
+
+    private void AddMoreRow()
+    {
+        var row = new Border
+        {
+            CornerRadius = new CornerRadius(6),
+            Background = RowNormalBg,
+            Padding = new Thickness(8, 6, 8, 6),
+            Margin = new Thickness(0, 3, 0, 1),
+            Cursor = Cursors.Hand,
+            Child = new TextBlock
+            {
+                Text = "More actions…",
+                Foreground = BadgeText,
+                FontSize = 12,
+                FontWeight = FontWeights.Medium,
+            },
+        };
+
+        row.MouseLeftButtonUp += (_, _) => SetExpanded(true);
+        ActionListPanel.Children.Add(row);
+    }
+
+    private void SelectIndex(int index)
+    {
+        if (_visibleActions.Count == 0)
+        {
             return;
         }
 
-        _ = RunActionAsync(item.Id, item.Label, brief: null);
+        _selectedIndex = ((index % _visibleActions.Count) + _visibleActions.Count) % _visibleActions.Count;
+        _optionsFocused = false;
+        UpdateSelectionVisuals();
     }
 
-    private async Task RunActionAsync(string actionId, string actionLabel, string? brief)
+    private void MoveSelection(int delta) => SelectIndex(_selectedIndex + delta);
+
+    private MenuAction? GetSelectedAction() =>
+        _selectedIndex >= 0 && _selectedIndex < _visibleActions.Count
+            ? _visibleActions[_selectedIndex]
+            : null;
+
+    private void UpdateSelectionVisuals()
+    {
+        for (var i = 0; i < _actionRows.Count; i++)
+        {
+            var isSelected = i == _selectedIndex;
+            _actionRows[i].Background = isSelected ? RowSelectedBg : RowNormalBg;
+            _actionRows[i].BorderBrush = isSelected ? RowSelectedBorder : Brushes.Transparent;
+        }
+
+        UpdateOptionsRow();
+        UpdateMenuHints();
+        UpdateModeLine();
+    }
+
+    private void SetExpanded(bool expanded)
+    {
+        if (_expanded == expanded)
+        {
+            return;
+        }
+
+        _expanded = expanded;
+        _filter = string.Empty;
+        _optionsFocused = false;
+        BuildMenu(resetSelection: true);
+        FocusStageTarget();
+    }
+
+    // ---- Options row -------------------------------------------------------
+
+    private bool HasVisibleOptions =>
+        _highlighted is { Options: not ActionOptionKind.None };
+
+    private void UpdateOptionsRow()
+    {
+        _highlighted = _stage == PanelStage.ChooseAction ? GetSelectedAction() : null;
+
+        if (_stage != PanelStage.ChooseAction || _highlighted is null)
+        {
+            OptionsRowBorder.Visibility = Visibility.Collapsed;
+            ContextPreviewBorder.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        if (_highlighted.Options == ActionOptionKind.None)
+        {
+            OptionsRowBorder.Visibility = Visibility.Collapsed;
+            ContextPreviewBorder.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        OptionsRowBorder.Visibility = Visibility.Visible;
+
+        if (_highlighted.Options == ActionOptionKind.Context)
+        {
+            LanguageChipButton.Visibility = Visibility.Collapsed;
+            ContextChipButton.Visibility = Visibility.Visible;
+
+            var context = _surroundingContext;
+            if (context is null)
+            {
+                ContextChipButton.IsEnabled = false;
+                ContextChipButton.Content = "Context unavailable in this app";
+                OptionsHintText.Text = string.Empty;
+                ContextPreviewBorder.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            ContextChipButton.IsEnabled = true;
+            var on = _settings.GetContextEnabled(_highlighted.Id);
+            ContextChipButton.Content = on ? "Context: on" : "Context: off";
+            OptionsHintText.Text = on
+                ? "Space toggles · preview below"
+                : "Space toggles";
+
+            if (on)
+            {
+                ContextPreviewBorder.Visibility = Visibility.Visible;
+                ContextPreviewHeaderText.Text = BuildContextHeader(context, "Context preview");
+                ContextPreviewBox.Text = BuildContextText(context);
+                ContextPreviewBox.Visibility = _contextPreviewExpanded
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+            }
+            else
+            {
+                ContextPreviewBorder.Visibility = Visibility.Collapsed;
+            }
+
+            return;
+        }
+
+        ContextChipButton.Visibility = Visibility.Collapsed;
+        ContextPreviewBorder.Visibility = Visibility.Collapsed;
+        LanguageChipButton.Visibility = Visibility.Visible;
+        LanguageChipButton.IsEnabled = true;
+        LanguageChipButton.Content = $"Target: {_targetLanguage}";
+        OptionsHintText.Text = "Space cycles · Enter searches";
+    }
+
+    private void UpdatePromptOptions()
+    {
+        var isCompose = _promptActionId == "compose";
+        PromptContextSection.Visibility = isCompose ? Visibility.Visible : Visibility.Collapsed;
+        if (!isCompose)
+        {
+            PromptContextPreviewBorder.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var context = _surroundingContext;
+        if (context is null)
+        {
+            PromptContextChipButton.IsEnabled = false;
+            PromptContextChipButton.Content = "Context unavailable in this app";
+            PromptContextPreviewBorder.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        PromptContextChipButton.IsEnabled = true;
+        var on = _settings.GetContextEnabled("compose");
+        PromptContextChipButton.Content = on ? "Context: on" : "Context: off";
+
+        if (on)
+        {
+            PromptContextPreviewBorder.Visibility = Visibility.Visible;
+            PromptContextPreviewHeaderText.Text = BuildContextHeader(context, "Context preview");
+            PromptContextPreviewBox.Text = BuildContextText(context);
+            PromptContextPreviewBox.Visibility = _contextPreviewExpanded
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+        else
+        {
+            PromptContextPreviewBorder.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private string BuildContextHeader(SurroundingContext context, string title)
+    {
+        var counts = context.HasAny
+            ? $"{context.Before.Length}+{context.After.Length} chars"
+            : "no surrounding text";
+        return $"{title} · {counts} · click to {(_contextPreviewExpanded ? "hide" : "show")}";
+    }
+
+    private static string BuildContextText(SurroundingContext context)
+    {
+        var parts = new List<string>(2);
+        if (context.Before.Length > 0)
+        {
+            parts.Add(context.Before);
+        }
+
+        if (context.After.Length > 0)
+        {
+            parts.Add(context.After);
+        }
+
+        return parts.Count == 0 ? "(no surrounding text)" : string.Join(Environment.NewLine, parts);
+    }
+
+    private void UpdateMenuHints()
+    {
+        if (_stage != PanelStage.ChooseAction)
+        {
+            return;
+        }
+
+        var parts = new List<string>(4);
+        if (_expanded)
+        {
+            parts.Add(_filter.Length == 0 ? "Type to filter" : "Backspace deletes");
+            parts.Add("Left back");
+            if (HasVisibleOptions && !_optionsFocused)
+            {
+                parts.Add("Tab options");
+            }
+        }
+        else
+        {
+            parts.Add("Tab more actions");
+            if (HasVisibleOptions)
+            {
+                parts.Add("Space option");
+            }
+        }
+
+        if (_optionsFocused)
+        {
+            parts.Add("Shift+Tab back");
+        }
+
+        parts.Add("Esc closes");
+        MenuHintText.Text = string.Join(" · ", parts);
+    }
+
+    private void UpdateModeLine()
+    {
+        if (_stage == PanelStage.Unsupported)
+        {
+            return;
+        }
+
+        MenuAction? action = _stage switch
+        {
+            PanelStage.PromptInput => _promptActionId is null ? null : MenuModel.FindById(_promptActionId),
+            PanelStage.ChooseAction => GetSelectedAction(),
+            _ => MenuModel.FindById(_activeAction),
+        };
+
+        var label = action?.Label ?? "Emendly";
+        ModeLineText.Text = $"{label} · {_classification.CharacterCount} characters · {StateLabel(_classification.State)}";
+    }
+
+    private void ToggleContext(string actionId)
+    {
+        if (_surroundingContext is null)
+        {
+            return;
+        }
+
+        var enabled = !_settings.GetContextEnabled(actionId);
+        _settings.SetContextEnabled(actionId, enabled);
+
+        if (_stage == PanelStage.PromptInput)
+        {
+            UpdatePromptOptions();
+        }
+        else
+        {
+            UpdateOptionsRow();
+        }
+    }
+
+    private void CycleLanguage()
+    {
+        _targetLanguage = MenuModel.GetNextLanguage(_targetLanguage);
+        _settings.SetTargetLanguage(_targetLanguage);
+        UpdateOptionsRow();
+    }
+
+    private void ToggleOrCycleOption()
+    {
+        if (_highlighted is null)
+        {
+            return;
+        }
+
+        switch (_highlighted.Options)
+        {
+            case ActionOptionKind.Context:
+                ToggleContext(_highlighted.Id);
+                break;
+            case ActionOptionKind.Language:
+                CycleLanguage();
+                break;
+        }
+    }
+
+    private void ConfirmOption()
+    {
+        if (_highlighted is null)
+        {
+            return;
+        }
+
+        switch (_highlighted.Options)
+        {
+            case ActionOptionKind.Language:
+                OpenLanguagePicker();
+                break;
+            case ActionOptionKind.Context:
+                ToggleContext(_highlighted.Id);
+                break;
+        }
+    }
+
+    private void FocusOptions()
+    {
+        if (_highlighted is null)
+        {
+            return;
+        }
+
+        if (_highlighted.Options == ActionOptionKind.Context
+            && ContextChipButton.Visibility == Visibility.Visible
+            && ContextChipButton.IsEnabled)
+        {
+            _optionsFocused = true;
+            ContextChipButton.Focus();
+            Keyboard.Focus(ContextChipButton);
+        }
+        else if (_highlighted.Options == ActionOptionKind.Language
+            && LanguageChipButton.Visibility == Visibility.Visible)
+        {
+            _optionsFocused = true;
+            LanguageChipButton.Focus();
+            Keyboard.Focus(LanguageChipButton);
+        }
+
+        UpdateMenuHints();
+    }
+
+    // ---- Language picker ---------------------------------------------------
+
+    private void OpenLanguagePicker()
+    {
+        _languagePickerOpen = true;
+        LanguagePickerOverlay.Visibility = Visibility.Visible;
+
+        _updatingLanguageList = true;
+        LanguageSearchBox.Text = string.Empty;
+        _updatingLanguageList = false;
+
+        PopulateLanguages(string.Empty);
+
+        _ = Dispatcher.InvokeAsync(() =>
+        {
+            if (_languagePickerOpen)
+            {
+                LanguageSearchBox.Focus();
+                Keyboard.Focus(LanguageSearchBox);
+            }
+        });
+    }
+
+    private void CloseLanguagePicker(bool restoreFocus)
+    {
+        _languagePickerOpen = false;
+        LanguagePickerOverlay.Visibility = Visibility.Collapsed;
+
+        if (restoreFocus)
+        {
+            _optionsFocused = HasVisibleOptions;
+            FocusStageTarget();
+        }
+    }
+
+    private void PopulateLanguages(string term)
+    {
+        var current = _targetLanguage;
+        var trimmed = term.Trim();
+        var matches = new List<string>();
+
+        foreach (var language in MenuModel.GetLanguages(_targetLanguage))
+        {
+            if (trimmed.Length == 0
+                || language.Contains(trimmed, StringComparison.OrdinalIgnoreCase))
+            {
+                matches.Add(language);
+            }
+        }
+
+        var options = new List<string>();
+        if (trimmed.Length > 0 && matches.Count == 0)
+        {
+            options.Add(trimmed);
+        }
+
+        options.AddRange(matches);
+
+        _updatingLanguageList = true;
+        LanguageListBox.Items.Clear();
+        foreach (var option in options)
+        {
+            LanguageListBox.Items.Add(option);
+        }
+
+        if (options.Count > 0)
+        {
+            var selected = options.FindIndex(l => string.Equals(l, current, StringComparison.OrdinalIgnoreCase));
+            LanguageListBox.SelectedIndex = selected >= 0 ? selected : 0;
+        }
+
+        _updatingLanguageList = false;
+    }
+
+    private void MoveLanguageSelection(int delta)
+    {
+        var count = LanguageListBox.Items.Count;
+        if (count == 0)
+        {
+            return;
+        }
+
+        var index = LanguageListBox.SelectedIndex;
+        index = index < 0 ? 0 : ((index + delta) % count + count) % count;
+        LanguageListBox.SelectedIndex = index;
+        LanguageListBox.ScrollIntoView(LanguageListBox.Items[index]);
+    }
+
+    private void ApplyLanguage(string language)
+    {
+        var trimmed = language.Trim();
+        if (trimmed.Length == 0)
+        {
+            return;
+        }
+
+        _settings.SetTargetLanguage(trimmed);
+        _targetLanguage = trimmed;
+
+        CloseLanguagePicker(restoreFocus: false);
+        _optionsFocused = _highlighted?.Options == ActionOptionKind.Language;
+        UpdateOptionsRow();
+        FocusStageTarget();
+    }
+
+    // ---- Actions -----------------------------------------------------------
+
+    private void TriggerAction(MenuAction action, bool forceOptionsOff)
+    {
+        _optionsFocused = false;
+
+        switch (action.Kind)
+        {
+            case ActionKind.Insert:
+            case ActionKind.Custom:
+                OpenPrompt(action.Id, forceOptionsOff);
+                break;
+
+            default:
+                _ = RunActionAsync(action, forceOptionsOff);
+                break;
+        }
+    }
+
+    private void OpenPrompt(string actionId, bool forceOptionsOff)
+    {
+        var action = MenuModel.FindById(actionId);
+        if (action is null)
+        {
+            return;
+        }
+
+        _promptActionId = actionId;
+        _promptForceOptionsOff = forceOptionsOff;
+        _optionsFocused = false;
+
+        if (!string.Equals(_lastPromptActionId, actionId, StringComparison.Ordinal))
+        {
+            PromptInputBox.Text = string.Empty;
+            _lastPromptActionId = actionId;
+        }
+
+        PromptTitleText.Text = actionId == "custom"
+            ? "Custom prompt — tell Emendly what to do"
+            : "Compose — describe what to write";
+        PromptErrorText.Visibility = Visibility.Collapsed;
+
+        UpdatePromptOptions();
+        SetStage(PanelStage.PromptInput);
+    }
+
+    private void RunPrompt()
+    {
+        var text = PromptInputBox.Text.Trim();
+        var isCompose = _promptActionId == "compose";
+
+        if (text.Length == 0)
+        {
+            PromptErrorText.Text = isCompose
+                ? "Describe what to write before running."
+                : "Enter an instruction before running.";
+            PromptErrorText.Visibility = Visibility.Visible;
+            PromptInputBox.Focus();
+            return;
+        }
+
+        var action = _promptActionId is null ? null : MenuModel.FindById(_promptActionId);
+        if (action is null)
+        {
+            return;
+        }
+
+        PromptErrorText.Visibility = Visibility.Collapsed;
+        _ = RunActionAsync(action, _promptForceOptionsOff, text);
+        _promptForceOptionsOff = false;
+    }
+
+    private string BuildSelectionText()
+    {
+        var text = _classification.TrimmedText;
+        return text.Length <= MaxSelectionCharacters ? text : text[..MaxSelectionCharacters];
+    }
+
+    private Dictionary<string, object> BuildOptions(
+        MenuAction action,
+        bool forceOptionsOff,
+        string? promptText,
+        out string log)
+    {
+        var options = new Dictionary<string, object>(StringComparer.Ordinal);
+        var logParts = new List<string>(2);
+
+        switch (action.Id)
+        {
+            case "compose":
+                if (!string.IsNullOrWhiteSpace(promptText))
+                {
+                    options["brief"] = promptText.Trim();
+                }
+                break;
+
+            case "custom":
+                if (!string.IsNullOrWhiteSpace(promptText))
+                {
+                    options["instruction"] = promptText.Trim();
+                }
+                break;
+        }
+
+        if (action.Options == ActionOptionKind.Context)
+        {
+            var context = _surroundingContext;
+            var enabled = !forceOptionsOff
+                && _settings.GetContextEnabled(action.Id)
+                && context is not null
+                && context.HasAny;
+
+            options["include_context"] = enabled;
+            if (enabled && context is not null)
+            {
+                if (context.Before.Length > 0)
+                {
+                    options["context_before"] = context.Before;
+                }
+
+                if (context.After.Length > 0)
+                {
+                    options["context_after"] = context.After;
+                }
+            }
+
+            logParts.Add(enabled ? "context=on" : "context=off");
+        }
+        else if (action.Options == ActionOptionKind.Language)
+        {
+            if (!forceOptionsOff)
+            {
+                options["target_lang"] = _targetLanguage;
+                logParts.Add($"lang={_targetLanguage}");
+            }
+            else
+            {
+                logParts.Add("lang=default");
+            }
+        }
+
+        log = logParts.Count == 0 ? "none" : string.Join(",", logParts);
+        return options;
+    }
+
+    private async Task RunActionAsync(MenuAction action, bool forceOptionsOff, string? promptText = null)
     {
         CancelActiveRequest();
         _requestCts?.Dispose();
         var cts = new CancellationTokenSource();
         _requestCts = cts;
 
-        _activeAction = actionId;
+        _activeAction = action.Id;
+        _activeKind = action.Kind;
+        _activeReadOnly = _classification.ReadOnly;
         _resultText = string.Empty;
-        PreviewActionText.Text = actionLabel;
+        _optionsFocused = false;
+        _languagePickerOpen = false;
+
+        var selectionText = BuildSelectionText();
+        var options = BuildOptions(action, forceOptionsOff, promptText, out var optionsLog);
+        ShellLogger.LogActionOptions(action.Id, _targetWindow.ProcessName, optionsLog);
+
+        var inputText = action.Id == "compose" ? string.Empty : selectionText;
+
+        var inputBytes = Encoding.UTF8.GetByteCount(inputText)
+            + Encoding.UTF8.GetByteCount(promptText ?? string.Empty);
+        foreach (var value in options.Values)
+        {
+            if (value is string textValue)
+            {
+                inputBytes += Encoding.UTF8.GetByteCount(textValue);
+            }
+        }
+
+        PreviewActionText.Text = action.Label;
         PreviewBox.Text = string.Empty;
+        ErrorText.Visibility = Visibility.Collapsed;
         SetStage(PanelStage.Streaming);
 
-        Dictionary<string, string>? options = null;
-        if (!string.IsNullOrWhiteSpace(brief))
-        {
-            options = new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["brief"] = brief.Trim(),
-            };
-        }
-
-        string? context = null;
-        if (actionId == "compose")
-        {
-            if (_mode == PanelMode.Selection && !string.IsNullOrWhiteSpace(_selectedText))
-            {
-                context = _selectedText;
-            }
-            else if (UseContextCheckBox.Visibility == Visibility.Visible
-                && UseContextCheckBox.IsChecked == true
-                && !string.IsNullOrWhiteSpace(_fieldContext))
-            {
-                context = _fieldContext;
-            }
-        }
-
-        var inputText = actionId == "compose" ? string.Empty : _selectedText;
-        var inputBytes = Encoding.UTF8.GetByteCount(inputText)
-            + Encoding.UTF8.GetByteCount(brief ?? string.Empty)
-            + Encoding.UTF8.GetByteCount(context ?? string.Empty);
-
         var request = new TransformRequest(
-            Action: actionId,
+            Action: action.Id,
             Text: inputText,
-            Context: context,
+            Context: null,
             AppProcess: _targetWindow.ProcessName,
-            Options: options);
+            Options: options.Count > 0 ? options : null);
 
         var sw = Stopwatch.StartNew();
         var streamedText = new StringBuilder();
@@ -469,7 +1148,7 @@ public partial class PanelWindow : Window
             PreviewStatusText.Text = $"Ready · {_resultText.Length} chars · {latency} ms";
 
             ShellLogger.LogAction(
-                actionId,
+                action.Id,
                 _targetWindow.ProcessName,
                 latency,
                 inputBytes,
@@ -481,7 +1160,7 @@ public partial class PanelWindow : Window
         catch (OperationCanceledException)
         {
             sw.Stop();
-            ShellLogger.LogAction(actionId, _targetWindow.ProcessName, sw.ElapsedMilliseconds, inputBytes, 0, "cancelled");
+            ShellLogger.LogAction(action.Id, _targetWindow.ProcessName, sw.ElapsedMilliseconds, inputBytes, 0, "cancelled");
             if (ReferenceEquals(_requestCts, cts) && !_closing)
             {
                 PreviewStatusText.Text = "Cancelled";
@@ -493,7 +1172,7 @@ public partial class PanelWindow : Window
         catch (TransformException ex)
         {
             sw.Stop();
-            ShellLogger.LogAction(actionId, _targetWindow.ProcessName, sw.ElapsedMilliseconds, inputBytes, 0, ex.Code);
+            ShellLogger.LogAction(action.Id, _targetWindow.ProcessName, sw.ElapsedMilliseconds, inputBytes, 0, ex.Code);
             if (ReferenceEquals(_requestCts, cts) && !_closing)
             {
                 PreviewStatusText.Text = ex.Code;
@@ -505,7 +1184,7 @@ public partial class PanelWindow : Window
         catch (Exception ex)
         {
             sw.Stop();
-            ShellLogger.LogAction(actionId, _targetWindow.ProcessName, sw.ElapsedMilliseconds, inputBytes, 0, "internal");
+            ShellLogger.LogAction(action.Id, _targetWindow.ProcessName, sw.ElapsedMilliseconds, inputBytes, 0, "internal");
             if (ReferenceEquals(_requestCts, cts) && !_closing)
             {
                 PreviewStatusText.Text = "Error";
@@ -525,7 +1204,107 @@ public partial class PanelWindow : Window
         }
     }
 
-    private async Task ApplyResultAsync(string text)
+    private Task SwitchReferenceListAsync()
+    {
+        var otherId = _activeAction == "synonyms" ? "antonyms" : "synonyms";
+        var action = MenuModel.FindById(otherId);
+        return action is null ? Task.CompletedTask : RunActionAsync(action, forceOptionsOff: false);
+    }
+
+    private void ConfigureStreamingButtons()
+    {
+        PreviewStatusText.Text = "Generating…";
+        PreviewHintText.Text = "Esc cancels and closes";
+        ErrorText.Visibility = Visibility.Collapsed;
+        ReadOnlyNoticeText.Visibility = Visibility.Collapsed;
+
+        PrimaryButton.Visibility = Visibility.Collapsed;
+        SecondaryActionButton.Visibility = Visibility.Collapsed;
+        SwitchListButton.Visibility = Visibility.Collapsed;
+        SecondaryButton.Content = "Cancel";
+        SecondaryButton.Visibility = Visibility.Visible;
+    }
+
+    private void ConfigurePreviewButtons()
+    {
+        var isReadOnly = _activeReadOnly;
+        var isReferenceList = _activeKind == ActionKind.ReferenceList;
+        var hasSelection = _classification.State != SelectionState.Empty;
+
+        PrimaryButton.Content = isReadOnly || isReferenceList
+            ? "Copy"
+            : hasSelection
+                ? "Replace"
+                : "Insert";
+        PrimaryButton.Visibility = Visibility.Visible;
+
+        SecondaryButton.Content = "Discard";
+        SecondaryButton.Visibility = Visibility.Visible;
+
+        SecondaryActionButton.Content = hasSelection ? "Replace" : "Insert";
+        SecondaryActionButton.Visibility = !isReadOnly && isReferenceList
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
+        SwitchListButton.Content = _activeAction == "synonyms" ? "Antonyms (A)" : "Synonyms (S)";
+        SwitchListButton.Visibility = isReferenceList ? Visibility.Visible : Visibility.Collapsed;
+
+        ReadOnlyNoticeText.Text = "Read-only field: nothing will be written.";
+        ReadOnlyNoticeText.Visibility = isReadOnly ? Visibility.Visible : Visibility.Collapsed;
+        ErrorText.Visibility = Visibility.Collapsed;
+
+        PreviewHintText.Text = isReadOnly
+            ? "Enter copies · Esc closes"
+            : isReferenceList
+                ? "Enter copies · A/S flips list · Esc closes"
+                : hasSelection
+                    ? "Enter replaces the selection · Esc closes"
+                    : "Enter inserts at the caret · Esc closes";
+    }
+
+    private void ConfigureErrorButtons()
+    {
+        PrimaryButton.Content = "Back";
+        PrimaryButton.Visibility = Visibility.Visible;
+        SecondaryButton.Content = "Close";
+        SecondaryButton.Visibility = Visibility.Visible;
+        SecondaryActionButton.Visibility = Visibility.Collapsed;
+        SwitchListButton.Visibility = Visibility.Collapsed;
+        ReadOnlyNoticeText.Visibility = Visibility.Collapsed;
+        PreviewHintText.Text = "Enter goes back · Esc closes";
+    }
+
+    private void InvokePrimaryResultAction()
+    {
+        if (_stage != PanelStage.PreviewReady)
+        {
+            return;
+        }
+
+        if (_activeReadOnly || _activeKind == ActionKind.ReferenceList)
+        {
+            _ = CopyResultAsync(_resultText);
+        }
+        else
+        {
+            _ = WriteResultAsync(_resultText);
+        }
+    }
+
+    private void ReturnToPreviousStage()
+    {
+        if (_activeAction is "compose" or "custom")
+        {
+            OpenPrompt(_activeAction, forceOptionsOff: false);
+            return;
+        }
+
+        _optionsFocused = false;
+        SetStage(PanelStage.ChooseAction);
+        UpdateSelectionVisuals();
+    }
+
+    private async Task CopyResultAsync(string text)
     {
         if (_applying || string.IsNullOrEmpty(text))
         {
@@ -538,21 +1317,63 @@ public partial class PanelWindow : Window
         var sw = Stopwatch.StartNew();
         try
         {
+            await _inserter.CopyTextAsync(text);
+            sw.Stop();
+            ShellLogger.LogAction(
+                "copy",
+                _targetWindow.ProcessName,
+                sw.ElapsedMilliseconds,
+                Encoding.UTF8.GetByteCount(_classification.UntrimmedText),
+                Encoding.UTF8.GetByteCount(text),
+                "ok");
+        }
+        catch (Exception)
+        {
+            sw.Stop();
+            ShellLogger.LogAction("copy", _targetWindow.ProcessName, sw.ElapsedMilliseconds, 0, 0, "error");
+        }
+        finally
+        {
+            if (!_closing)
+            {
+                _closing = true;
+                _ = WindowEnumerator.RestoreForeground(_targetHwnd);
+                Close();
+            }
+        }
+    }
+
+    private async Task WriteResultAsync(string text)
+    {
+        if (_applying || string.IsNullOrEmpty(text))
+        {
+            return;
+        }
+
+        _applying = true;
+        Hide();
+
+        var hasSelection = _classification.State != SelectionState.Empty;
+        var textToInsert = _classification.RestoreSurroundingWhitespace(text);
+
+        var sw = Stopwatch.StartNew();
+        try
+        {
             var pasted = await _inserter.PasteAsync(
                 targetHwnd: _targetHwnd,
                 processName: _targetWindow.ProcessName,
                 actionName: _activeAction,
-                textToInsert: text,
-                replacedText: _mode == PanelMode.Selection ? _selectedText : string.Empty,
-                wasSelection: _mode == PanelMode.Selection);
+                textToInsert: textToInsert,
+                replacedText: hasSelection ? _classification.UntrimmedText : string.Empty,
+                wasSelection: hasSelection);
 
             sw.Stop();
             ShellLogger.LogAction(
                 "apply",
                 _targetWindow.ProcessName,
                 sw.ElapsedMilliseconds,
-                Encoding.UTF8.GetByteCount(_selectedText),
-                Encoding.UTF8.GetByteCount(text),
+                Encoding.UTF8.GetByteCount(_classification.UntrimmedText),
+                Encoding.UTF8.GetByteCount(textToInsert),
                 pasted ? "ok" : "failed");
 
             if (pasted)
@@ -596,16 +1417,32 @@ public partial class PanelWindow : Window
         Close();
     }
 
+    // ---- Keyboard ----------------------------------------------------------
+
     private void OnWindowPreviewKeyDown(object sender, KeyEventArgs e)
     {
+        if (_languagePickerOpen)
+        {
+            HandleLanguagePickerKey(e);
+            return;
+        }
+
         switch (_stage)
         {
+            case PanelStage.Unsupported:
+                if (e.Key is Key.Escape or Key.Enter)
+                {
+                    e.Handled = true;
+                    CloseAndRestoreFocus();
+                }
+                break;
+
             case PanelStage.ChooseAction:
                 HandleChooseActionKey(e);
                 break;
 
-            case PanelStage.ComposePrompt:
-                HandleComposePromptKey(e);
+            case PanelStage.PromptInput:
+                HandlePromptInputKey(e);
                 break;
 
             case PanelStage.Streaming:
@@ -613,20 +1450,12 @@ public partial class PanelWindow : Window
                 {
                     e.Handled = true;
                     CancelActiveRequest();
+                    CloseAndRestoreFocus();
                 }
                 break;
 
             case PanelStage.PreviewReady:
-                if (e.Key == Key.Enter)
-                {
-                    e.Handled = true;
-                    _ = ApplyResultAsync(_resultText);
-                }
-                else if (e.Key == Key.Escape)
-                {
-                    e.Handled = true;
-                    CloseAndRestoreFocus();
-                }
+                HandlePreviewKey(e);
                 break;
 
             case PanelStage.ErrorOrCancelled:
@@ -638,7 +1467,7 @@ public partial class PanelWindow : Window
                 else if (e.Key == Key.Enter)
                 {
                     e.Handled = true;
-                    SetStage(_mode == PanelMode.Selection ? PanelStage.ChooseAction : PanelStage.ComposePrompt);
+                    ReturnToPreviousStage();
                 }
                 break;
         }
@@ -646,57 +1475,213 @@ public partial class PanelWindow : Window
 
     private void HandleChooseActionKey(KeyEventArgs e)
     {
+        var modifiers = Keyboard.Modifiers;
+        var ctrl = (modifiers & ModifierKeys.Control) != 0;
+        var shift = (modifiers & ModifierKeys.Shift) != 0;
+
         if (e.Key == Key.Escape)
         {
             e.Handled = true;
-            CloseAndRestoreFocus();
-            return;
-        }
+            if (_optionsFocused)
+            {
+                _optionsFocused = false;
+                FocusStageTarget();
+            }
+            else
+            {
+                CloseAndRestoreFocus();
+            }
 
-        if (e.Key == Key.Up)
-        {
-            e.Handled = true;
-            SelectActionIndex(_selectedIndex - 1);
-            return;
-        }
-
-        if (e.Key == Key.Down)
-        {
-            e.Handled = true;
-            SelectActionIndex(_selectedIndex + 1);
             return;
         }
 
         if (e.Key == Key.Enter)
         {
             e.Handled = true;
-            TriggerAction(_selectedIndex);
+            if (_optionsFocused)
+            {
+                ConfirmOption();
+                return;
+            }
+
+            var action = GetSelectedAction();
+            if (action is not null)
+            {
+                TriggerAction(action, forceOptionsOff: ctrl);
+            }
+
             return;
         }
 
-        var digitIndex = e.Key switch
-        {
-            Key.D1 or Key.NumPad1 => 0,
-            Key.D2 or Key.NumPad2 => 1,
-            Key.D3 or Key.NumPad3 => 2,
-            Key.D4 or Key.NumPad4 => 3,
-            Key.D5 or Key.NumPad5 => 4,
-            _ => -1,
-        };
-
-        if (digitIndex >= 0)
+        if (e.Key == Key.Up)
         {
             e.Handled = true;
-            TriggerAction(digitIndex);
+            MoveSelection(-1);
+            return;
         }
+
+        if (e.Key == Key.Down)
+        {
+            e.Handled = true;
+            MoveSelection(1);
+            return;
+        }
+
+        if (e.Key == Key.Tab)
+        {
+            e.Handled = true;
+            HandleTab(shift);
+            return;
+        }
+
+        if (e.Key == Key.Right)
+        {
+            e.Handled = true;
+            if (!_expanded)
+            {
+                SetExpanded(true);
+            }
+
+            return;
+        }
+
+        if (e.Key == Key.Left)
+        {
+            e.Handled = true;
+            if (_optionsFocused)
+            {
+                _optionsFocused = false;
+                FocusStageTarget();
+            }
+            else if (_expanded)
+            {
+                SetExpanded(false);
+            }
+
+            return;
+        }
+
+        if (e.Key == Key.Space)
+        {
+            if (HasVisibleOptions)
+            {
+                e.Handled = true;
+                ToggleOrCycleOption();
+            }
+
+            return;
+        }
+
+        if (e.Key == Key.Back)
+        {
+            if (_expanded)
+            {
+                e.Handled = true;
+                if (_filter.Length > 0)
+                {
+                    _filter = _filter[..^1];
+                    BuildMenu(resetSelection: true);
+                }
+                else
+                {
+                    SetExpanded(false);
+                }
+            }
+
+            return;
+        }
+
+        var digit = DigitFromKey(e.Key);
+        if (digit > 0)
+        {
+            e.Handled = true;
+            if (digit <= _visibleActions.Count)
+            {
+                _selectedIndex = digit - 1;
+                _optionsFocused = false;
+                UpdateSelectionVisuals();
+                TriggerAction(_visibleActions[digit - 1], forceOptionsOff: ctrl);
+            }
+
+            return;
+        }
+
+        if ((modifiers & (ModifierKeys.Control | ModifierKeys.Alt | ModifierKeys.Windows)) != 0)
+        {
+            return;
+        }
+
+        var letter = LetterFromKey(e.Key);
+        if (letter is null)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        if (!_expanded)
+        {
+            _expanded = true;
+            _filter = string.Empty;
+        }
+
+        _filter += letter.Value;
+        BuildMenu(resetSelection: true);
     }
 
-    private void HandleComposePromptKey(KeyEventArgs e)
+    private void HandleTab(bool shift)
+    {
+        if (shift)
+        {
+            if (_optionsFocused)
+            {
+                _optionsFocused = false;
+                FocusStageTarget();
+                return;
+            }
+
+            if (_expanded)
+            {
+                SetExpanded(false);
+            }
+
+            return;
+        }
+
+        if (_optionsFocused)
+        {
+            _optionsFocused = false;
+            FocusStageTarget();
+            return;
+        }
+
+        if (_expanded)
+        {
+            if (HasVisibleOptions)
+            {
+                FocusOptions();
+            }
+
+            return;
+        }
+
+        SetExpanded(true);
+    }
+
+    private void HandlePromptInputKey(KeyEventArgs e)
     {
         if (e.Key == Key.Escape)
         {
             e.Handled = true;
-            CloseAndRestoreFocus();
+            if (_optionsFocused)
+            {
+                _optionsFocused = false;
+                FocusStageTarget();
+            }
+            else
+            {
+                CloseAndRestoreFocus();
+            }
+
             return;
         }
 
@@ -705,28 +1690,173 @@ public partial class PanelWindow : Window
             e.Handled = true;
             if ((Keyboard.Modifiers & ModifierKeys.Shift) != 0)
             {
-                var caret = BriefBox.CaretIndex;
-                BriefBox.Text = BriefBox.Text.Insert(caret, Environment.NewLine);
-                BriefBox.CaretIndex = caret + Environment.NewLine.Length;
+                var caret = PromptInputBox.CaretIndex;
+                PromptInputBox.Text = PromptInputBox.Text.Insert(caret, Environment.NewLine);
+                PromptInputBox.CaretIndex = caret + Environment.NewLine.Length;
                 return;
             }
 
-            if (!string.IsNullOrWhiteSpace(BriefBox.Text))
+            RunPrompt();
+            return;
+        }
+
+        if (e.Key == Key.Space && _optionsFocused && _promptActionId == "compose")
+        {
+            e.Handled = true;
+            ToggleContext("compose");
+            return;
+        }
+
+        if (e.Key == Key.Tab && _promptActionId == "compose")
+        {
+            var shift = (Keyboard.Modifiers & ModifierKeys.Shift) != 0;
+            if (shift)
             {
-                _ = RunActionAsync("compose", "Compose", BriefBox.Text);
+                if (_optionsFocused)
+                {
+                    e.Handled = true;
+                    _optionsFocused = false;
+                    FocusStageTarget();
+                }
+
+                return;
+            }
+
+            if (!_optionsFocused && PromptContextChipButton.IsEnabled)
+            {
+                e.Handled = true;
+                _optionsFocused = true;
+                FocusStageTarget();
+                return;
+            }
+
+            if (_optionsFocused)
+            {
+                e.Handled = true;
+                _optionsFocused = false;
+                FocusStageTarget();
             }
         }
     }
+
+    private void HandlePreviewKey(KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape)
+        {
+            e.Handled = true;
+            CloseAndRestoreFocus();
+            return;
+        }
+
+        if (e.Key == Key.Enter)
+        {
+            e.Handled = true;
+            InvokePrimaryResultAction();
+            return;
+        }
+
+        if (_activeKind != ActionKind.ReferenceList)
+        {
+            return;
+        }
+
+        if (e.Key == Key.A && _activeAction == "synonyms")
+        {
+            e.Handled = true;
+            _ = SwitchReferenceListAsync();
+        }
+        else if (e.Key == Key.S && _activeAction == "antonyms")
+        {
+            e.Handled = true;
+            _ = SwitchReferenceListAsync();
+        }
+    }
+
+    private void HandleLanguagePickerKey(KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape)
+        {
+            e.Handled = true;
+            CloseLanguagePicker(restoreFocus: true);
+            return;
+        }
+
+        if (e.Key == Key.Enter)
+        {
+            e.Handled = true;
+            var chosen = LanguageListBox.SelectedItem as string;
+            if (string.IsNullOrWhiteSpace(chosen))
+            {
+                chosen = LanguageSearchBox.Text.Trim();
+            }
+
+            if (!string.IsNullOrWhiteSpace(chosen))
+            {
+                ApplyLanguage(chosen);
+            }
+
+            return;
+        }
+
+        if (e.Key == Key.Up)
+        {
+            e.Handled = true;
+            MoveLanguageSelection(-1);
+            return;
+        }
+
+        if (e.Key == Key.Down)
+        {
+            e.Handled = true;
+            MoveLanguageSelection(1);
+            return;
+        }
+
+        if (e.Key == Key.Tab)
+        {
+            e.Handled = true;
+        }
+    }
+
+    private static int DigitFromKey(Key key) =>
+        key switch
+        {
+            Key.D1 or Key.NumPad1 => 1,
+            Key.D2 or Key.NumPad2 => 2,
+            Key.D3 or Key.NumPad3 => 3,
+            Key.D4 or Key.NumPad4 => 4,
+            Key.D5 or Key.NumPad5 => 5,
+            Key.D6 or Key.NumPad6 => 6,
+            Key.D7 or Key.NumPad7 => 7,
+            Key.D8 or Key.NumPad8 => 8,
+            Key.D9 or Key.NumPad9 => 9,
+            _ => 0,
+        };
+
+    private static char? LetterFromKey(Key key)
+    {
+        var value = (int)key;
+        var first = (int)Key.A;
+        var last = (int)Key.Z;
+        if (value < first || value > last)
+        {
+            return null;
+        }
+
+        return (char)('a' + (value - first));
+    }
+
+    // ---- UI event handlers -------------------------------------------------
 
     private void OnPrimaryButtonClick(object sender, RoutedEventArgs e)
     {
         if (_stage == PanelStage.PreviewReady)
         {
-            _ = ApplyResultAsync(_resultText);
+            InvokePrimaryResultAction();
         }
         else if (_stage == PanelStage.ErrorOrCancelled)
         {
-            SetStage(_mode == PanelMode.Selection ? PanelStage.ChooseAction : PanelStage.ComposePrompt);
+            ReturnToPreviousStage();
         }
     }
 
@@ -736,11 +1866,112 @@ public partial class PanelWindow : Window
         {
             CancelActiveRequest();
         }
-        else
+
+        CloseAndRestoreFocus();
+    }
+
+    private void OnSecondaryActionButtonClick(object sender, RoutedEventArgs e)
+    {
+        if (_stage == PanelStage.PreviewReady
+            && _activeKind == ActionKind.ReferenceList
+            && !_activeReadOnly)
         {
-            CloseAndRestoreFocus();
+            _ = WriteResultAsync(_resultText);
         }
     }
+
+    private void OnSwitchListButtonClick(object sender, RoutedEventArgs e)
+    {
+        if (_stage == PanelStage.PreviewReady && _activeKind == ActionKind.ReferenceList)
+        {
+            _ = SwitchReferenceListAsync();
+        }
+    }
+
+    private void OnCloseButtonClick(object sender, RoutedEventArgs e) => CloseAndRestoreFocus();
+
+    private void OnContextChipClick(object sender, RoutedEventArgs e)
+    {
+        if (_stage == PanelStage.PromptInput && _promptActionId == "compose")
+        {
+            ToggleContext("compose");
+            return;
+        }
+
+        if (_highlighted is { Options: ActionOptionKind.Context } action)
+        {
+            ToggleContext(action.Id);
+        }
+    }
+
+    private void OnLanguageChipClick(object sender, RoutedEventArgs e)
+    {
+        if (_stage == PanelStage.ChooseAction)
+        {
+            OpenLanguagePicker();
+        }
+    }
+
+    private void OnContextPreviewToggleClick(object sender, MouseButtonEventArgs e)
+    {
+        _contextPreviewExpanded = !_contextPreviewExpanded;
+
+        if (_stage == PanelStage.PromptInput)
+        {
+            UpdatePromptOptions();
+        }
+        else
+        {
+            UpdateOptionsRow();
+        }
+    }
+
+    private void OnPromptBackClick(object sender, RoutedEventArgs e)
+    {
+        _optionsFocused = false;
+        SetStage(PanelStage.ChooseAction);
+        UpdateSelectionVisuals();
+    }
+
+    private void OnPromptRunClick(object sender, RoutedEventArgs e) => RunPrompt();
+
+    private void OnLanguageSearchTextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_updatingLanguageList)
+        {
+            return;
+        }
+
+        PopulateLanguages(LanguageSearchBox.Text);
+    }
+
+    private void OnLanguageListDoubleClick(object sender, MouseButtonEventArgs e) =>
+        CommitLanguageListClick(e);
+
+    private void OnLanguageListMouseUp(object sender, MouseButtonEventArgs e) =>
+        CommitLanguageListClick(e);
+
+    private void CommitLanguageListClick(MouseButtonEventArgs e)
+    {
+        if (!_languagePickerOpen)
+        {
+            return;
+        }
+
+        if (e.OriginalSource is not DependencyObject source)
+        {
+            return;
+        }
+
+        var container = ItemsControl.ContainerFromElement(LanguageListBox, source) as ListBoxItem;
+
+        if (container?.Content is string language)
+        {
+            ApplyLanguage(language);
+        }
+    }
+
+    // ---- Window plumbing ---------------------------------------------------
 
     private void OnWindowDeactivated(object? sender, EventArgs e)
     {
@@ -821,4 +2052,22 @@ public partial class PanelWindow : Window
         CancelActiveRequest();
         base.OnClosed(e);
     }
+
+    private static string StateLabel(SelectionState state) =>
+        state switch
+        {
+            SelectionState.Empty => "Empty",
+            SelectionState.Word => "Word",
+            SelectionState.Passage => "Passage",
+            _ => "Empty",
+        };
+
+    private static string StateLabelLower(SelectionState state) =>
+        state switch
+        {
+            SelectionState.Empty => "empty",
+            SelectionState.Word => "word",
+            SelectionState.Passage => "passage",
+            _ => "empty",
+        };
 }

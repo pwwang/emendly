@@ -84,6 +84,16 @@ public sealed class ClipboardInserter
 
     public bool HasUndo => LastUndo is not null;
 
+    public Task CopyTextAsync(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return Task.CompletedTask;
+        }
+
+        return SetClipboardTextAsync(text);
+    }
+
     public async Task<bool> PasteAsync(
         IntPtr targetHwnd,
         string processName,
