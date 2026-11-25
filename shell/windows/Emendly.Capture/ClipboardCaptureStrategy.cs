@@ -31,6 +31,8 @@ public sealed class ClipboardCaptureStrategy : ICaptureStrategy
 
         try
         {
+            ClipboardHelper.WaitForModifiersReleased();
+
             var seqBefore = ClipboardHelper.GetSequenceNumber();
             if (!ClipboardHelper.SendCtrlChord(ClipboardHelper.VkC))
             {

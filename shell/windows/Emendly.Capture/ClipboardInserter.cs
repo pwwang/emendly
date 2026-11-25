@@ -85,6 +85,8 @@ public sealed class ClipboardInserter
                 return false;
             }
 
+            ClipboardHelper.WaitForModifiersReleased();
+
             if (!ClipboardHelper.SendCtrlChord(ClipboardHelper.VkV))
             {
                 return false;

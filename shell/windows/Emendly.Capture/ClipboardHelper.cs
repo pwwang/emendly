@@ -13,6 +13,41 @@ internal static class ClipboardHelper
     private const uint MapVkToVsc = 0;
 
     internal const ushort VkControl = 0x11;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int vKey);
+
+    /// <summary>
+    /// A global hotkey fires while its modifiers are still physically held, so a
+    /// synthetic Ctrl+C sent immediately becomes Ctrl+Alt+C and copies nothing.
+    /// Wait until Ctrl, Alt, Shift and the Windows keys are up.
+    /// </summary>
+    internal static bool WaitForModifiersReleased(int timeoutMs = 600)
+    {
+        int[] modifiers = { 0x11, 0x12, 0x10, 0x5B, 0x5C };
+        var deadline = Environment.TickCount64 + timeoutMs;
+        while (Environment.TickCount64 < deadline)
+        {
+            var anyDown = false;
+            foreach (var vk in modifiers)
+            {
+                if ((GetAsyncKeyState(vk) & 0x8000) != 0)
+                {
+                    anyDown = true;
+                    break;
+                }
+            }
+
+            if (!anyDown)
+            {
+                return true;
+            }
+
+            Thread.Sleep(10);
+        }
+
+        return false;
+    }
     internal const ushort VkC = 0x43;
     internal const ushort VkV = 0x56;
     internal const ushort VkZ = 0x5A;
