@@ -8,9 +8,13 @@ namespace Emendly.App;
 
 public partial class SettingsWindow : Window
 {
+    private const double BesideGap = 12;
+    private const double ScreenMargin = 4;
+
     private readonly AppSettings _settings;
     private readonly HotkeyWindow? _hotkeyWindow;
     private readonly CaretLocation? _caretAnchor;
+    private readonly Rect? _panelBounds;
     private readonly string _originalHotkey;
     private readonly string _originalLanguage;
 
@@ -18,19 +22,23 @@ public partial class SettingsWindow : Window
     private bool _capturingHotkey;
     private string _languageAtOpen = LanguageSettings.DefaultTargetLanguage;
 
+    public event EventHandler? Saved;
+
     public SettingsWindow(
         AppSettings current,
         string transformerStatus,
         string? defaultTargetLanguage = null,
         HotkeyWindow? hotkeyWindow = null,
         CaretLocation? caretAnchor = null,
-        bool topmost = false)
+        bool topmost = false,
+        Rect? panelBounds = null)
     {
         InitializeComponent();
 
         _settings = current;
         _hotkeyWindow = hotkeyWindow;
         _caretAnchor = caretAnchor;
+        _panelBounds = panelBounds;
         _originalHotkey = hotkeyWindow?.RegisteredHotkey is { Length: > 0 } registered
             ? registered
             : current.Hotkey;
@@ -56,7 +64,12 @@ public partial class SettingsWindow : Window
             ? "EMENDLY_API_KEY: detected in environment (never stored on disk)"
             : "EMENDLY_API_KEY: not set (set as an environment variable)";
 
-        if (caretAnchor.HasValue)
+        if (panelBounds.HasValue)
+        {
+            WindowStartupLocation = WindowStartupLocation.Manual;
+            PositionBesidePanel(panelBounds.Value, 400);
+        }
+        else if (caretAnchor.HasValue)
         {
             WindowStartupLocation = WindowStartupLocation.Manual;
             CenterOnCaretScreen(caretAnchor.Value, 400);
@@ -86,9 +99,15 @@ public partial class SettingsWindow : Window
     private void OnWindowLoaded(object sender, RoutedEventArgs e)
     {
         ApplyDarkTitleBar();
-        if (_caretAnchor.HasValue)
+
+        var height = ActualHeight > 0 ? ActualHeight : 400;
+        if (_panelBounds.HasValue)
         {
-            CenterOnCaretScreen(_caretAnchor.Value, ActualHeight > 0 ? ActualHeight : 400);
+            PositionBesidePanel(_panelBounds.Value, height);
+        }
+        else if (_caretAnchor.HasValue)
+        {
+            CenterOnCaretScreen(_caretAnchor.Value, height);
         }
 
         var helper = new WindowInteropHelper(this);
@@ -117,6 +136,53 @@ public partial class SettingsWindow : Window
 
         Left = Math.Clamp(desiredLeft, workLeft, Math.Max(workLeft, workRight - width));
         Top = Math.Clamp(desiredTop, workTop, Math.Max(workTop, workBottom - height));
+    }
+
+    private void PositionBesidePanel(Rect panel, double height)
+    {
+        var monitor = _caretAnchor.HasValue
+            ? CaretLocator.GetMonitorWorkArea(_caretAnchor.Value.Bounds.Left, _caretAnchor.Value.Bounds.Bottom)
+            : CaretLocator.GetMonitorWorkArea(panel.Left, panel.Top);
+
+        var scaleX = monitor.DpiScaleX > 0 ? monitor.DpiScaleX : 1.0;
+        var scaleY = monitor.DpiScaleY > 0 ? monitor.DpiScaleY : 1.0;
+
+        var workLeft = monitor.WorkArea.Left / scaleX;
+        var workTop = monitor.WorkArea.Top / scaleY;
+        var workRight = monitor.WorkArea.Right / scaleX;
+        var workBottom = monitor.WorkArea.Bottom / scaleY;
+
+        var width = ActualWidth > 0 ? ActualWidth : Width;
+        double left;
+        double top;
+
+        // Right first, then left, then below. The panel is 380 wide, so a monitor that fits
+        // the 420 px settings window beside it will almost always take one of the two sides.
+        if (panel.Right + BesideGap + width <= workRight - ScreenMargin)
+        {
+            left = panel.Right + BesideGap;
+            top = panel.Top;
+        }
+        else if (panel.Left - BesideGap - width >= workLeft + ScreenMargin)
+        {
+            left = panel.Left - BesideGap - width;
+            top = panel.Top;
+        }
+        else
+        {
+            left = panel.Left;
+            top = panel.Bottom + BesideGap;
+
+            if (top + height > workBottom - ScreenMargin)
+            {
+                // Below does not fit: stack above the panel rather than overlap it or slide off screen.
+                var above = panel.Top - BesideGap - height;
+                top = above >= workTop + ScreenMargin ? above : workBottom - height - ScreenMargin;
+            }
+        }
+
+        Left = Math.Clamp(left, workLeft + ScreenMargin, Math.Max(workLeft + ScreenMargin, workRight - width - ScreenMargin));
+        Top = Math.Clamp(top, workTop + ScreenMargin, Math.Max(workTop + ScreenMargin, workBottom - height - ScreenMargin));
     }
 
     private void OnShortcutButtonClick(object sender, RoutedEventArgs e)
@@ -169,6 +235,14 @@ public partial class SettingsWindow : Window
         if (DefaultLanguageCombo.IsDropDownOpen)
         {
             HandleLanguageDropdownKey(e);
+            return;
+        }
+
+        if (e.Key == Key.Escape)
+        {
+            e.Handled = true;
+            CancelHotkeyCapture();
+            Close();
             return;
         }
 
@@ -310,13 +384,14 @@ public partial class SettingsWindow : Window
         _settings.Model = model;
         _settings.Save();
 
-        DialogResult = true;
+        Saved?.Invoke(this, EventArgs.Empty);
+        Close();
     }
 
     private void OnCancelClick(object sender, RoutedEventArgs e)
     {
         CancelHotkeyCapture();
-        DialogResult = false;
+        Close();
     }
 
     private void ShowValidation(string message)

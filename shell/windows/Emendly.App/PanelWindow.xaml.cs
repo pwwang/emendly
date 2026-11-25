@@ -47,6 +47,12 @@ public partial class PanelWindow : Window
         TextBlock? LanguageCodeText,
         MenuAction Action);
 
+    private sealed record RetryState(
+        MenuAction Action,
+        TransformRequest Request,
+        string OptionsLog,
+        int InputBytes);
+
     private const int MaxSelectionCharacters = 4000;
     private const double FullStageMinHeight = 420;
 
@@ -83,6 +89,7 @@ public partial class PanelWindow : Window
     private bool _contextPreviewExpanded;
     private MenuAction? _highlighted;
     private string _targetLanguage = LanguageSettings.DefaultTargetLanguage;
+    private bool _languagePickedInRun;
     private bool _languageDropdownOpen;
     private bool _languageDropdownCommitted;
     private string? _promptActionId;
@@ -93,10 +100,13 @@ public partial class PanelWindow : Window
     private bool _activeReadOnly;
     private string _resultText = string.Empty;
     private CancellationTokenSource? _requestCts;
+    private RetryState? _retryState;
+    private bool _canRetry;
     private bool _applying;
     private bool _closing;
     private bool _focusConfirmed;
     private bool _activationNoticeShown;
+    private bool _settingsRequested;
 
     public event EventHandler? PasteCompleted;
 
@@ -261,7 +271,7 @@ public partial class PanelWindow : Window
         {
             await Task.Delay(checkDelayMs);
 
-            if (_closing || !IsVisible)
+            if (_closing || !IsVisible || _settingsRequested)
             {
                 return;
             }
@@ -1127,6 +1137,7 @@ public partial class PanelWindow : Window
         if (!string.IsNullOrEmpty(chosen))
         {
             _targetLanguage = chosen;
+            _languagePickedInRun = true;
             UpdateRowOptions();
         }
 
@@ -1137,6 +1148,33 @@ public partial class PanelWindow : Window
         {
             FocusStageTarget();
         }
+    }
+
+    public void ApplySavedSettings(string? engineDefaultTargetLanguage)
+    {
+        // A language chosen in the panel wins over the saved default for this run.
+        if (_closing || _languagePickedInRun)
+        {
+            return;
+        }
+
+        var language = _settings.GetEffectiveTargetLanguage(engineDefaultTargetLanguage);
+        if (string.Equals(language, _targetLanguage, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _targetLanguage = language;
+
+        if (_languageDropdownOpen)
+        {
+            var languages = MenuModel.GetLanguages(_targetLanguage);
+            LanguageDropdown.ItemsSource = languages;
+            LanguageDropdown.Text = _targetLanguage;
+            LanguageDropdown.SelectedIndex = MenuModel.FindLanguageIndex(languages, _targetLanguage);
+        }
+
+        UpdateRowOptions();
     }
 
     // ---- Actions -----------------------------------------------------------
@@ -1286,24 +1324,8 @@ public partial class PanelWindow : Window
 
     private async Task RunActionAsync(MenuAction action, bool forceOptionsOff, string? promptText = null)
     {
-        CancelActiveRequest();
-        _requestCts?.Dispose();
-        var cts = new CancellationTokenSource();
-        _requestCts = cts;
-
-        _activeAction = action.Id;
-        _activeKind = action.Kind;
-        _activeReadOnly = _classification.ReadOnly;
-        _resultText = string.Empty;
-        _optionsFocused = false;
-        _languageDropdownOpen = false;
-        _languageDropdownCommitted = false;
-        LanguageDropdown.IsDropDownOpen = false;
-        LanguageDropdownOverlay.Visibility = Visibility.Collapsed;
-
         var selectionText = BuildSelectionText();
         var options = BuildOptions(action, forceOptionsOff, promptText, out var optionsLog);
-        ShellLogger.LogActionOptions(action.Id, _targetWindow.ProcessName, optionsLog);
 
         var inputText = action.Id == "compose" ? string.Empty : selectionText;
 
@@ -1317,16 +1339,52 @@ public partial class PanelWindow : Window
             }
         }
 
-        PreviewBox.Text = string.Empty;
-        ErrorText.Visibility = Visibility.Collapsed;
-        SetStage(PanelStage.Streaming);
-
         var request = new TransformRequest(
             Action: action.Id,
             Text: inputText,
             Context: null,
             AppProcess: _targetWindow.ProcessName,
             Options: options.Count > 0 ? options : null);
+
+        await ExecuteRequestAsync(new RetryState(action, request, optionsLog, inputBytes));
+    }
+
+    private void RetryRequest()
+    {
+        if (_stage != PanelStage.ErrorOrCancelled || !_canRetry || _retryState is null)
+        {
+            return;
+        }
+
+        _ = ExecuteRequestAsync(_retryState);
+    }
+
+    private async Task ExecuteRequestAsync(RetryState state)
+    {
+        // Cancelling first means a retry can never stack a second request on the old one.
+        CancelActiveRequest();
+        _requestCts?.Dispose();
+        var cts = new CancellationTokenSource();
+        _requestCts = cts;
+
+        _retryState = state;
+        _canRetry = false;
+        _activeAction = state.Action.Id;
+        _activeKind = state.Action.Kind;
+        _activeReadOnly = _classification.ReadOnly;
+        _resultText = string.Empty;
+        _optionsFocused = false;
+        _languageDropdownOpen = false;
+        _languageDropdownCommitted = false;
+        LanguageDropdown.IsDropDownOpen = false;
+        LanguageDropdownOverlay.Visibility = Visibility.Collapsed;
+
+        // Every attempt, including a retry, logs its own action line.
+        ShellLogger.LogActionOptions(state.Action.Id, _targetWindow.ProcessName, state.OptionsLog);
+
+        PreviewBox.Text = string.Empty;
+        ErrorText.Visibility = Visibility.Collapsed;
+        SetStage(PanelStage.Streaming);
 
         var sw = Stopwatch.StartNew();
         var streamedText = new StringBuilder();
@@ -1335,7 +1393,7 @@ public partial class PanelWindow : Window
         {
             var result = await Task.Run(
                 () => _transformer.TransformAsync(
-                    request,
+                    state.Request,
                     delta =>
                     {
                         streamedText.Append(delta);
@@ -1372,13 +1430,14 @@ public partial class PanelWindow : Window
             var latency = result.LatencyMs > 0 ? result.LatencyMs : sw.ElapsedMilliseconds;
 
             ShellLogger.LogAction(
-                action.Id,
+                state.Action.Id,
                 _targetWindow.ProcessName,
                 latency,
-                inputBytes,
+                state.InputBytes,
                 Encoding.UTF8.GetByteCount(_resultText),
                 "ok");
 
+            _canRetry = false;
             if (_stage == PanelStage.Streaming)
             {
                 SetStage(PanelStage.PreviewReady);
@@ -1387,9 +1446,10 @@ public partial class PanelWindow : Window
         catch (OperationCanceledException)
         {
             sw.Stop();
-            ShellLogger.LogAction(action.Id, _targetWindow.ProcessName, sw.ElapsedMilliseconds, inputBytes, 0, "cancelled");
+            ShellLogger.LogAction(state.Action.Id, _targetWindow.ProcessName, sw.ElapsedMilliseconds, state.InputBytes, 0, "cancelled");
             if (ReferenceEquals(_requestCts, cts) && !_closing && _stage == PanelStage.Streaming)
             {
+                _canRetry = false;
                 PreviewStatusText.Text = "cancelled";
                 ErrorText.Text = "Request cancelled.";
                 ErrorText.Visibility = Visibility.Visible;
@@ -1399,9 +1459,10 @@ public partial class PanelWindow : Window
         catch (TransformException ex)
         {
             sw.Stop();
-            ShellLogger.LogAction(action.Id, _targetWindow.ProcessName, sw.ElapsedMilliseconds, inputBytes, 0, ex.Code);
+            ShellLogger.LogAction(state.Action.Id, _targetWindow.ProcessName, sw.ElapsedMilliseconds, state.InputBytes, 0, ex.Code);
             if (ReferenceEquals(_requestCts, cts) && !_closing && _stage == PanelStage.Streaming)
             {
+                _canRetry = true;
                 PreviewStatusText.Text = ex.Code;
                 ErrorText.Text = ex.Message;
                 ErrorText.Visibility = Visibility.Visible;
@@ -1411,9 +1472,10 @@ public partial class PanelWindow : Window
         catch (Exception ex)
         {
             sw.Stop();
-            ShellLogger.LogAction(action.Id, _targetWindow.ProcessName, sw.ElapsedMilliseconds, inputBytes, 0, "internal");
+            ShellLogger.LogAction(state.Action.Id, _targetWindow.ProcessName, sw.ElapsedMilliseconds, state.InputBytes, 0, "internal");
             if (ReferenceEquals(_requestCts, cts) && !_closing && _stage == PanelStage.Streaming)
             {
+                _canRetry = true;
                 PreviewStatusText.Text = "error";
                 ErrorText.Text = ex.Message;
                 ErrorText.Visibility = Visibility.Visible;
@@ -1502,15 +1564,25 @@ public partial class PanelWindow : Window
         PreviewLockIcon.Visibility = Visibility.Collapsed;
         PreviewActionText.Text = "Result";
         PreviewStreamingAccentBar.Visibility = Visibility.Collapsed;
-
-        PrimaryButton.Content = "Back";
-        PrimaryButton.Visibility = Visibility.Visible;
-        SecondaryButton.Content = "Close";
-        SecondaryButton.Visibility = Visibility.Visible;
         SecondaryActionButton.Visibility = Visibility.Collapsed;
         SwitchListButton.Visibility = Visibility.Collapsed;
         ReadOnlyNoticeText.Visibility = Visibility.Collapsed;
-        PreviewHintText.Text = "Enter or Esc goes back";
+
+        if (_canRetry)
+        {
+            PrimaryButton.Content = "Retry";
+            SecondaryButton.Content = "Back";
+            PreviewHintText.Text = "Enter retry · R retry · Esc back";
+        }
+        else
+        {
+            PrimaryButton.Content = "Back";
+            SecondaryButton.Content = "Close";
+            PreviewHintText.Text = "Esc back";
+        }
+
+        PrimaryButton.Visibility = Visibility.Visible;
+        SecondaryButton.Visibility = Visibility.Visible;
     }
 
     private void InvokePrimaryResultAction()
@@ -1552,6 +1624,7 @@ public partial class PanelWindow : Window
         ErrorText.Text = string.Empty;
         ErrorText.Visibility = Visibility.Collapsed;
         ReadOnlyNoticeText.Visibility = Visibility.Collapsed;
+        _canRetry = false;
 
         _optionsFocused = false;
         SetStage(PanelStage.ChooseAction);
@@ -1725,12 +1798,41 @@ public partial class PanelWindow : Window
                 break;
 
             case PanelStage.ErrorOrCancelled:
-                if (e.Key is Key.Escape or Key.Enter)
-                {
-                    e.Handled = true;
-                    DiscardResultAndReturnToMenu();
-                }
+                HandleErrorStageKey(e);
                 break;
+        }
+    }
+
+    private void HandleErrorStageKey(KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape)
+        {
+            e.Handled = true;
+            DiscardResultAndReturnToMenu();
+            return;
+        }
+
+        if (e.Key == Key.Enter)
+        {
+            e.Handled = true;
+            if (_canRetry)
+            {
+                RetryRequest();
+            }
+            else
+            {
+                DiscardResultAndReturnToMenu();
+            }
+
+            return;
+        }
+
+        if (e.Key == Key.R
+            && _canRetry
+            && (Keyboard.Modifiers & (ModifierKeys.Control | ModifierKeys.Alt | ModifierKeys.Windows)) == 0)
+        {
+            e.Handled = true;
+            RetryRequest();
         }
     }
 
@@ -2100,13 +2202,26 @@ public partial class PanelWindow : Window
         }
         else if (_stage == PanelStage.ErrorOrCancelled)
         {
-            DiscardResultAndReturnToMenu();
+            if (_canRetry)
+            {
+                RetryRequest();
+            }
+            else
+            {
+                DiscardResultAndReturnToMenu();
+            }
         }
     }
 
     private void OnSecondaryButtonClick(object sender, RoutedEventArgs e)
     {
         if (_stage is PanelStage.Streaming or PanelStage.PreviewReady)
+        {
+            DiscardResultAndReturnToMenu();
+            return;
+        }
+
+        if (_stage == PanelStage.ErrorOrCancelled && _canRetry)
         {
             DiscardResultAndReturnToMenu();
             return;
@@ -2142,9 +2257,10 @@ public partial class PanelWindow : Window
             return;
         }
 
-        var wasTopmost = Topmost;
-        CloseAndRestoreFocus();
-        SettingsRequested?.Invoke(this, new SettingsRequestedEventArgs(_caretLocation, wasTopmost));
+        // The panel stays open: settings opens beside it, so the panel keeps its stage,
+        // selection, filter and typed prompt while the user edits.
+        _settingsRequested = true;
+        SettingsRequested?.Invoke(this, new SettingsRequestedEventArgs(_caretLocation, Topmost));
     }
 
     private void OnContextChipClick(object sender, RoutedEventArgs e)
@@ -2226,7 +2342,7 @@ public partial class PanelWindow : Window
     {
         // Losing focus must not dismiss the panel or cancel a running request.
         // The panel is closed only by Esc, the close icon, the hotkey toggle or Apply.
-        if (_focusConfirmed || _activationNoticeShown)
+        if (_focusConfirmed || _activationNoticeShown || _settingsRequested)
         {
             return;
         }

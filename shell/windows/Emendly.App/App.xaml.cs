@@ -28,6 +28,7 @@ public partial class App : Application
     private PanelWindow? _activePanel;
     private NoticeWindow? _activeNotice;
     private SettingsWindow? _settingsWindow;
+    private bool _shutdownAfterSettings;
     private bool _probeInFlight;
 
     [DllImport("user32.dll", SetLastError = true)]
@@ -54,11 +55,11 @@ public partial class App : Application
 
         if (openSettingsAndExit)
         {
+            _shutdownAfterSettings = true;
             _hotkeyWindow = new HotkeyWindow();
             _hotkeyWindow.ActivateRequested += OnActivateRequested;
             _hotkeyWindow.OpenSettingsRequested += (_, _) => OpenSettings();
             OpenSettings();
-            Shutdown(0);
             return;
         }
 
@@ -296,6 +297,9 @@ public partial class App : Application
             {
                 _activePanel = null;
             }
+
+            // Settings is only ever open beside the panel, so it must never outlive it.
+            CloseSettingsWindow();
         };
 
         _activePanel = panel;
@@ -353,9 +357,17 @@ public partial class App : Application
             return;
         }
 
-        if (_activePanel is not null)
+        // The panel stays open underneath; settings is placed beside it instead of taking its
+        // place. Only a visible, laid-out panel can anchor the window.
+        Rect? panelBounds = null;
+        if (_activePanel is { IsVisible: true } panel
+            && panel.ActualWidth > 0
+            && panel.ActualHeight > 0
+            && !double.IsNaN(panel.Left)
+            && !double.IsNaN(panel.Top))
         {
-            _activePanel.CloseAndRestoreFocus();
+            panelBounds = new Rect(panel.Left, panel.Top, panel.ActualWidth, panel.ActualHeight);
+            topmost = panel.Topmost;
         }
 
         var status = _transformer?.StatusSummary ?? "Unavailable";
@@ -365,26 +377,49 @@ public partial class App : Application
             _transformer?.DefaultTargetLanguage,
             _hotkeyWindow,
             caretAnchor,
-            topmost);
+            topmost,
+            panelBounds);
         _settingsWindow = dialog;
 
-        try
+        dialog.Saved += (_, _) => OnSettingsSaved();
+        dialog.Closed += (_, _) =>
         {
-            var saved = dialog.ShowDialog();
-            if (saved != true)
+            if (ReferenceEquals(_settingsWindow, dialog))
             {
-                return;
+                _settingsWindow = null;
             }
 
-            if (_transformer is not null)
+            if (_shutdownAfterSettings)
             {
-                _ = ConfigureTransformerSafeAsync(_settings.BaseUrl, _settings.Model);
+                _shutdownAfterSettings = false;
+                Shutdown(0);
             }
-        }
-        finally
+        };
+
+        dialog.Show();
+    }
+
+    private void OnSettingsSaved()
+    {
+        if (_transformer is not null)
         {
-            _settingsWindow = null;
+            _ = ConfigureTransformerSafeAsync(_settings.BaseUrl, _settings.Model);
         }
+
+        _activePanel?.ApplySavedSettings(_transformer?.DefaultTargetLanguage);
+    }
+
+    private void CloseSettingsWindow()
+    {
+        var window = _settingsWindow;
+        if (window is null)
+        {
+            return;
+        }
+
+        // Clear the field first so the Closed handler does not run twice.
+        _settingsWindow = null;
+        window.Close();
     }
 
     private async Task ConfigureTransformerSafeAsync(string baseUrl, string model)
@@ -476,6 +511,8 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         CloseNotice();
+        _shutdownAfterSettings = false;
+        CloseSettingsWindow();
 
         if (_activePanel is not null)
         {
