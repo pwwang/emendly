@@ -14,6 +14,18 @@ using Emendly.Capture;
 
 namespace Emendly.App;
 
+public sealed class SettingsRequestedEventArgs : EventArgs
+{
+    public CaretLocation CaretLocation { get; }
+    public bool WasTopmost { get; }
+
+    public SettingsRequestedEventArgs(CaretLocation caretLocation, bool wasTopmost)
+    {
+        CaretLocation = caretLocation;
+        WasTopmost = wasTopmost;
+    }
+}
+
 public partial class PanelWindow : Window
 {
     private enum PanelStage
@@ -24,7 +36,6 @@ public partial class PanelWindow : Window
         Streaming,
         PreviewReady,
         ErrorOrCancelled,
-        Settings,
     }
 
     private sealed record ActionRowElements(
@@ -59,7 +70,6 @@ public partial class PanelWindow : Window
     private readonly AppSettings _settings;
     private readonly ITransformer _transformer;
     private readonly ClipboardInserter _inserter;
-    private readonly HotkeyWindow? _hotkeyWindow;
     private readonly double _menuMinHeight;
     private readonly List<MenuAction> _visibleActions = new();
     private readonly List<ActionRowElements> _actionRows = new();
@@ -85,13 +95,12 @@ public partial class PanelWindow : Window
     private bool _applying;
     private bool _closing;
     private bool _focusConfirmed;
-    private bool _capturingHotkey;
-    private bool _languagePickerFromSettings;
-    private PanelStage _settingsReturnStage = PanelStage.ChooseAction;
 
     public event EventHandler? PasteCompleted;
 
     public event EventHandler? ActivationFailed;
+
+    public event EventHandler<SettingsRequestedEventArgs>? SettingsRequested;
 
     public PanelWindow(
         WindowInfo targetWindow,
@@ -103,8 +112,7 @@ public partial class PanelWindow : Window
         ClipboardInserter inserter,
         string? unsupportedReason,
         string strategyName = "uia",
-        IntPtr editorHwnd = default,
-        HotkeyWindow? hotkeyWindow = null)
+        IntPtr editorHwnd = default)
     {
         InitializeComponent();
 
@@ -119,7 +127,6 @@ public partial class PanelWindow : Window
         _settings = settings;
         _transformer = transformer;
         _inserter = inserter;
-        _hotkeyWindow = hotkeyWindow;
         _targetLanguage = settings.GetEffectiveTargetLanguage(transformer.DefaultTargetLanguage);
 
         if (!string.IsNullOrWhiteSpace(unsupportedReason))
@@ -235,11 +242,6 @@ public partial class PanelWindow : Window
                 Keyboard.Focus(PrimaryButton);
                 break;
 
-            case PanelStage.Settings:
-                ShortcutButton.Focus();
-                Keyboard.Focus(ShortcutButton);
-                break;
-
             default:
                 Keyboard.Focus(this);
                 break;
@@ -305,11 +307,6 @@ public partial class PanelWindow : Window
 
     private void SetStage(PanelStage stage)
     {
-        if (stage != PanelStage.Settings)
-        {
-            CancelHotkeyCapture();
-        }
-
         _stage = stage;
 
         MinHeight = stage is PanelStage.PromptInput or PanelStage.Streaming
@@ -320,7 +317,6 @@ public partial class PanelWindow : Window
         UnsupportedPanel.Visibility = stage == PanelStage.Unsupported ? Visibility.Visible : Visibility.Collapsed;
         MenuPanel.Visibility = stage == PanelStage.ChooseAction ? Visibility.Visible : Visibility.Collapsed;
         PromptPanel.Visibility = stage == PanelStage.PromptInput ? Visibility.Visible : Visibility.Collapsed;
-        SettingsPanel.Visibility = stage == PanelStage.Settings ? Visibility.Visible : Visibility.Collapsed;
 
         var previewVisible = stage is PanelStage.Streaming or PanelStage.PreviewReady or PanelStage.ErrorOrCancelled;
         PreviewPanel.Visibility = previewVisible ? Visibility.Visible : Visibility.Collapsed;
@@ -352,10 +348,6 @@ public partial class PanelWindow : Window
 
             case PanelStage.ErrorOrCancelled:
                 ConfigureErrorButtons();
-                break;
-
-            case PanelStage.Settings:
-                UpdateSettingsView();
                 break;
         }
 
@@ -974,12 +966,6 @@ public partial class PanelWindow : Window
             _ => MenuModel.FindById(_activeAction),
         };
 
-        if (_stage == PanelStage.Settings)
-        {
-            ModeLineText.Text = "Settings";
-            return;
-        }
-
         var label = action?.Label ?? "Emendly";
         ModeLineText.Text = $"{label} · {_classification.CharacterCount} characters · {StateLabel(_classification.State)}";
     }
@@ -1063,7 +1049,6 @@ public partial class PanelWindow : Window
 
     private void OpenLanguagePicker()
     {
-        _languagePickerFromSettings = _stage == PanelStage.Settings;
         _languagePickerOpen = true;
         LanguagePickerOverlay.Visibility = Visibility.Visible;
 
@@ -1086,21 +1071,12 @@ public partial class PanelWindow : Window
 
     private void CloseLanguagePicker(bool restoreFocus)
     {
-        var fromSettings = _languagePickerFromSettings;
-        _languagePickerFromSettings = false;
         _languagePickerOpen = false;
         LanguagePickerOverlay.Visibility = Visibility.Collapsed;
         RefreshPanelHeight();
 
         if (restoreFocus)
         {
-            if (fromSettings && _stage == PanelStage.Settings)
-            {
-                DefaultLanguageButton.Focus();
-                Keyboard.Focus(DefaultLanguageButton);
-                return;
-            }
-
             _optionsFocused = CanFocusCurrentOption;
             UpdateMenuHints();
             FocusStageTarget();
@@ -1168,25 +1144,6 @@ public partial class PanelWindow : Window
             return;
         }
 
-        if (_languagePickerFromSettings)
-        {
-            _settings.SetDefaultLanguage(trimmed);
-            _targetLanguage = trimmed;
-            CloseLanguagePicker(restoreFocus: false);
-            UpdateSettingsView();
-
-            _ = Dispatcher.InvokeAsync(() =>
-            {
-                if (!_closing && _stage == PanelStage.Settings)
-                {
-                    DefaultLanguageButton.Focus();
-                    Keyboard.Focus(DefaultLanguageButton);
-                }
-            });
-
-            return;
-        }
-
         _settings.SetTargetLanguage(trimmed);
         _targetLanguage = trimmed;
 
@@ -1195,137 +1152,6 @@ public partial class PanelWindow : Window
         _optionsFocused = _highlighted?.Options == ActionOptionKind.Language && CanFocusCurrentOption;
         UpdateMenuHints();
         FocusStageTarget();
-    }
-
-    // ---- Settings stage ----------------------------------------------------
-
-    private string CurrentHotkey => _hotkeyWindow?.RegisteredHotkey ?? _settings.Hotkey;
-
-    private void UpdateSettingsView()
-    {
-        ResetCaptureState();
-        ShortcutButton.Content = CurrentHotkey;
-        DefaultLanguageButton.Content = _targetLanguage;
-    }
-
-    private void ResetCaptureState()
-    {
-        _capturingHotkey = false;
-        ShortcutErrorText.Visibility = Visibility.Collapsed;
-    }
-
-    private void BeginHotkeyCapture()
-    {
-        if (_stage != PanelStage.Settings)
-        {
-            return;
-        }
-
-        _capturingHotkey = true;
-        ShortcutButton.Content = "Press the shortcut…";
-        ShortcutErrorText.Visibility = Visibility.Collapsed;
-        RefreshPanelHeight();
-        ShortcutButton.Focus();
-        Keyboard.Focus(ShortcutButton);
-    }
-
-    private void CancelHotkeyCapture()
-    {
-        if (!_capturingHotkey)
-        {
-            return;
-        }
-
-        _capturingHotkey = false;
-        ShortcutButton.Content = CurrentHotkey;
-        ShortcutErrorText.Visibility = Visibility.Collapsed;
-        RefreshPanelHeight();
-    }
-
-    private void HandleHotkeyCaptureKey(KeyEventArgs e)
-    {
-        e.Handled = true;
-
-        var key = e.Key == Key.System ? e.SystemKey : e.Key;
-        if (key == Key.Escape)
-        {
-            CancelHotkeyCapture();
-            ShortcutButton.Focus();
-            Keyboard.Focus(ShortcutButton);
-            return;
-        }
-
-        if (IsModifierKey(key))
-        {
-            return;
-        }
-
-        var modifiers = Keyboard.Modifiers
-            & (ModifierKeys.Control | ModifierKeys.Alt | ModifierKeys.Shift | ModifierKeys.Windows);
-
-        if (modifiers == ModifierKeys.None && !HotkeyWindow.IsFunctionKey(key))
-        {
-            return;
-        }
-
-        ApplyCapturedHotkey(HotkeyWindow.FormatCombination(modifiers, key));
-    }
-
-    private void ApplyCapturedHotkey(string combination)
-    {
-        string value;
-        if (_hotkeyWindow is not null)
-        {
-            if (!_hotkeyWindow.TryReplace(combination, out value, out _))
-            {
-                // TryReplace restored the previous registration; stay in capture so
-                // the user can try another combination.
-                ShortcutErrorText.Visibility = Visibility.Visible;
-                RefreshPanelHeight();
-                return;
-            }
-        }
-        else
-        {
-            value = combination;
-        }
-
-        _capturingHotkey = false;
-        _settings.Hotkey = value;
-        _settings.Save();
-        ShellLogger.LogHotkey(value);
-
-        ShortcutButton.Content = value;
-        ShortcutErrorText.Visibility = Visibility.Collapsed;
-        RefreshPanelHeight();
-        ShortcutButton.Focus();
-        Keyboard.Focus(ShortcutButton);
-    }
-
-    private static bool IsModifierKey(Key key) =>
-        key is Key.LeftCtrl or Key.RightCtrl
-            or Key.LeftAlt or Key.RightAlt
-            or Key.LeftShift or Key.RightShift
-            or Key.LWin or Key.RWin;
-
-    private void ReturnFromSettings()
-    {
-        var target = _settingsReturnStage == PanelStage.Unsupported
-            ? PanelStage.Unsupported
-            : PanelStage.ChooseAction;
-
-        _optionsFocused = false;
-        SetStage(target);
-        if (target == PanelStage.ChooseAction)
-        {
-            UpdateSelectionVisuals();
-        }
-        else
-        {
-            ModeLineText.Text = string.IsNullOrWhiteSpace(_targetWindow.ProcessName)
-                ? "Emendly"
-                : $"Emendly · {_targetWindow.ProcessName}";
-        }
     }
 
     // ---- Actions -----------------------------------------------------------
@@ -1866,12 +1692,6 @@ public partial class PanelWindow : Window
 
     private void OnWindowPreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (_capturingHotkey)
-        {
-            HandleHotkeyCaptureKey(e);
-            return;
-        }
-
         if (_languagePickerOpen)
         {
             HandleLanguagePickerKey(e);
@@ -1894,10 +1714,6 @@ public partial class PanelWindow : Window
 
             case PanelStage.PromptInput:
                 HandlePromptInputKey(e);
-                break;
-
-            case PanelStage.Settings:
-                HandleSettingsKey(e);
                 break;
 
             case PanelStage.Streaming:
@@ -2196,35 +2012,6 @@ public partial class PanelWindow : Window
         }
     }
 
-    private void HandleSettingsKey(KeyEventArgs e)
-    {
-        if (e.Key == Key.Escape)
-        {
-            e.Handled = true;
-            ReturnFromSettings();
-            return;
-        }
-
-        if (e.Key == Key.Enter)
-        {
-            if (ShortcutButton.IsKeyboardFocusWithin)
-            {
-                e.Handled = true;
-                BeginHotkeyCapture();
-            }
-            else if (DefaultLanguageButton.IsKeyboardFocusWithin)
-            {
-                e.Handled = true;
-                OpenLanguagePicker();
-            }
-            else if (SettingsDoneButton.IsKeyboardFocusWithin)
-            {
-                e.Handled = true;
-                ReturnFromSettings();
-            }
-        }
-    }
-
     private void HandlePreviewKey(KeyEventArgs e)
     {
         if (e.Key == Key.Escape)
@@ -2379,33 +2166,15 @@ public partial class PanelWindow : Window
 
     private void OnSettingsButtonClick(object sender, RoutedEventArgs e)
     {
-        if (_closing || _stage == PanelStage.Settings)
+        if (_closing)
         {
             return;
         }
 
-        if (_languagePickerOpen)
-        {
-            CloseLanguagePicker(restoreFocus: false);
-        }
-
-        _settingsReturnStage = _stage == PanelStage.Unsupported
-            ? PanelStage.Unsupported
-            : PanelStage.ChooseAction;
-        SetStage(PanelStage.Settings);
+        var wasTopmost = Topmost;
+        CloseAndRestoreFocus();
+        SettingsRequested?.Invoke(this, new SettingsRequestedEventArgs(_caretLocation, wasTopmost));
     }
-
-    private void OnShortcutButtonClick(object sender, RoutedEventArgs e) => BeginHotkeyCapture();
-
-    private void OnDefaultLanguageButtonClick(object sender, RoutedEventArgs e)
-    {
-        if (_stage == PanelStage.Settings)
-        {
-            OpenLanguagePicker();
-        }
-    }
-
-    private void OnSettingsDoneClick(object sender, RoutedEventArgs e) => ReturnFromSettings();
 
     private void OnContextChipClick(object sender, RoutedEventArgs e)
     {

@@ -38,10 +38,12 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
+        var openSettingsAndExit = HasFlag(e.Args, "--settings");
+
         _instanceMutex = new Mutex(initiallyOwned: true, SingleInstanceMutexName, out _ownsMutex);
         if (!_ownsMutex)
         {
-            _ = HotkeyWindow.NotifyExistingInstance();
+            _ = HotkeyWindow.NotifyExistingInstance(openSettings: openSettingsAndExit);
             Shutdown(0);
             return;
         }
@@ -50,8 +52,31 @@ public partial class App : Application
         _captureRules = AppCaptureRules.LoadDefault();
         _transformer = CreateTransformer(_settings);
 
+        if (openSettingsAndExit)
+        {
+            _hotkeyWindow = new HotkeyWindow();
+            _hotkeyWindow.ActivateRequested += OnActivateRequested;
+            _hotkeyWindow.OpenSettingsRequested += (_, _) => OpenSettings();
+            OpenSettings();
+            Shutdown(0);
+            return;
+        }
+
         InitializeTrayIcon();
         InitializeHotkey();
+    }
+
+    private static bool HasFlag(string[] args, string flag)
+    {
+        foreach (var arg in args)
+        {
+            if (string.Equals(arg, flag, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static ITransformer CreateTransformer(AppSettings settings)
@@ -117,6 +142,7 @@ public partial class App : Application
         _hotkeyWindow = new HotkeyWindow();
         _hotkeyWindow.HotkeyPressed += OnHotkeyPressed;
         _hotkeyWindow.ActivateRequested += OnActivateRequested;
+        _hotkeyWindow.OpenSettingsRequested += (_, _) => OpenSettings();
 
         if (!_hotkeyWindow.Register(_settings.Hotkey, out var error))
         {
@@ -253,10 +279,13 @@ public partial class App : Application
             inserter: _inserter,
             unsupportedReason: unsupportedReason,
             strategyName: snapshot.StrategyName,
-            editorHwnd: snapshot.EditorHwnd,
-            hotkeyWindow: _hotkeyWindow);
+            editorHwnd: snapshot.EditorHwnd);
 
         panel.PasteCompleted += (_, _) => UpdateUndoMenuItem();
+        panel.SettingsRequested += (_, args) =>
+        {
+            _ = Dispatcher.InvokeAsync(() => OpenSettings(args.CaretLocation, args.WasTopmost));
+        };
         panel.ActivationFailed += (_, _) => ShowNotice(
             targetWindow.ProcessName,
             "Emendly could not take keyboard focus, so the panel was closed. Close any pop-ups and try again.",
@@ -316,7 +345,7 @@ public partial class App : Application
         ShowBalloon("Emendly", $"Emendly is already running. Press {hotkey} in any text field.", Forms.ToolTipIcon.Info);
     }
 
-    private void OpenSettings()
+    private void OpenSettings(CaretLocation? caretAnchor = null, bool topmost = false)
     {
         if (_settingsWindow is not null)
         {
@@ -324,8 +353,19 @@ public partial class App : Application
             return;
         }
 
+        if (_activePanel is not null)
+        {
+            _activePanel.CloseAndRestoreFocus();
+        }
+
         var status = _transformer?.StatusSummary ?? "Unavailable";
-        var dialog = new SettingsWindow(_settings, status);
+        var dialog = new SettingsWindow(
+            _settings,
+            status,
+            _transformer?.DefaultTargetLanguage,
+            _hotkeyWindow,
+            caretAnchor,
+            topmost);
         _settingsWindow = dialog;
 
         try
@@ -334,21 +374,6 @@ public partial class App : Application
             if (saved != true)
             {
                 return;
-            }
-
-            var hotkeyChanged = !string.Equals(_settings.Hotkey, dialog.HotkeyValue, StringComparison.OrdinalIgnoreCase);
-
-            _settings.BaseUrl = dialog.BaseUrlValue;
-            _settings.Model = dialog.ModelValue;
-            _settings.Hotkey = dialog.HotkeyValue;
-            _settings.Save();
-
-            if (hotkeyChanged && _hotkeyWindow is not null)
-            {
-                if (!_hotkeyWindow.Register(_settings.Hotkey, out var error))
-                {
-                    ShowBalloon("Emendly", error ?? $"Could not register hotkey {_settings.Hotkey}.", Forms.ToolTipIcon.Warning);
-                }
             }
 
             if (_transformer is not null)

@@ -9,44 +9,343 @@
         Background="#1E1E24"
         Foreground="#F3F4F6"
         FontFamily="Segoe UI"
-        FontSize="13">
+        FontSize="13"
+        Loaded="OnWindowLoaded"
+        PreviewKeyDown="OnWindowPreviewKeyDown">
+  <Window.Resources>
+    <Style x:Key="DarkScrollBarStyle" TargetType="ScrollBar">
+      <Setter Property="Width" Value="10" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ScrollBar">
+            <Grid Background="Transparent">
+              <Track x:Name="PART_Track" IsDirectionReversed="True">
+                <Track.DecreaseRepeatButton>
+                  <RepeatButton Command="ScrollBar.PageUpCommand" Opacity="0" Focusable="False" />
+                </Track.DecreaseRepeatButton>
+                <Track.Thumb>
+                  <Thumb>
+                    <Thumb.Template>
+                      <ControlTemplate TargetType="Thumb">
+                        <Border Background="#3A3F4E" CornerRadius="5" Margin="2,4" />
+                      </ControlTemplate>
+                    </Thumb.Template>
+                  </Thumb>
+                </Track.Thumb>
+                <Track.IncreaseRepeatButton>
+                  <RepeatButton Command="ScrollBar.PageDownCommand" Opacity="0" Focusable="False" />
+                </Track.IncreaseRepeatButton>
+              </Track>
+            </Grid>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style TargetType="ScrollBar" BasedOn="{StaticResource DarkScrollBarStyle}" />
+
+    <Style x:Key="DarkTextBoxStyle" TargetType="TextBox">
+      <Setter Property="Background" Value="#2A2A34" />
+      <Setter Property="Foreground" Value="#F3F4F6" />
+      <Setter Property="CaretBrush" Value="#F3F4F6" />
+      <Setter Property="SelectionBrush" Value="#3B82F6" />
+      <Setter Property="BorderBrush" Value="#3B3B48" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Padding" Value="8,6" />
+      <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="TextBox">
+            <Border Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="4"
+                    SnapsToDevicePixels="True">
+              <ScrollViewer x:Name="PART_ContentHost"
+                            Focusable="False"
+                            HorizontalScrollBarVisibility="{TemplateBinding HorizontalScrollBarVisibility}"
+                            VerticalScrollBarVisibility="{TemplateBinding VerticalScrollBarVisibility}" />
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+      <Style.Triggers>
+        <Trigger Property="IsMouseOver" Value="True">
+          <Setter Property="BorderBrush" Value="#4E5873" />
+        </Trigger>
+        <Trigger Property="IsKeyboardFocused" Value="True">
+          <Setter Property="BorderBrush" Value="#3B82F6" />
+        </Trigger>
+      </Style.Triggers>
+    </Style>
+
+    <Style x:Key="ShortcutButtonStyle" TargetType="Button">
+      <Setter Property="Background" Value="#2A2A34" />
+      <Setter Property="Foreground" Value="#F3F4F6" />
+      <Setter Property="BorderBrush" Value="#3B3B48" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Padding" Value="10,5" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="4"
+                    Padding="{TemplateBinding Padding}"
+                    SnapsToDevicePixels="True">
+              <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                VerticalAlignment="Center" />
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+      <Style.Triggers>
+        <Trigger Property="IsMouseOver" Value="True">
+          <Setter Property="Background" Value="#32384A" />
+          <Setter Property="BorderBrush" Value="#4E5873" />
+        </Trigger>
+        <Trigger Property="IsKeyboardFocused" Value="True">
+          <Setter Property="BorderBrush" Value="#3B82F6" />
+        </Trigger>
+      </Style.Triggers>
+    </Style>
+
+    <Style x:Key="DarkComboBoxItemStyle" TargetType="ComboBoxItem">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Foreground" Value="#F3F4F6" />
+      <Setter Property="Padding" Value="8,6" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ComboBoxItem">
+            <Border Background="{TemplateBinding Background}"
+                    Padding="{TemplateBinding Padding}"
+                    SnapsToDevicePixels="True">
+              <ContentPresenter HorizontalAlignment="Left" VerticalAlignment="Center" />
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+      <Style.Triggers>
+        <Trigger Property="IsSelected" Value="True">
+          <Setter Property="Background" Value="#263148" />
+          <Setter Property="Foreground" Value="#DBEAFE" />
+        </Trigger>
+        <Trigger Property="IsHighlighted" Value="True">
+          <Setter Property="Background" Value="#32384A" />
+        </Trigger>
+      </Style.Triggers>
+    </Style>
+
+    <Style x:Key="DarkComboBoxStyle" TargetType="ComboBox">
+      <Setter Property="Background" Value="#2A2A34" />
+      <Setter Property="Foreground" Value="#F3F4F6" />
+      <Setter Property="BorderBrush" Value="#3B3B48" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Padding" Value="8,6" />
+      <Setter Property="MaxDropDownHeight" Value="240" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+      <Setter Property="SnapsToDevicePixels" Value="True" />
+      <Setter Property="ItemContainerStyle" Value="{StaticResource DarkComboBoxItemStyle}" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ComboBox">
+            <Grid SnapsToDevicePixels="True">
+              <Border x:Name="ComboBorder"
+                      Background="{TemplateBinding Background}"
+                      BorderBrush="{TemplateBinding BorderBrush}"
+                      BorderThickness="{TemplateBinding BorderThickness}"
+                      CornerRadius="4"
+                      SnapsToDevicePixels="True">
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="26" />
+                  </Grid.ColumnDefinitions>
+                  <ToggleButton Grid.ColumnSpan="2"
+                                Focusable="False"
+                                ClickMode="Press"
+                                IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+                    <ToggleButton.Template>
+                      <ControlTemplate TargetType="ToggleButton">
+                        <Border Background="Transparent" />
+                      </ControlTemplate>
+                    </ToggleButton.Template>
+                  </ToggleButton>
+                  <ContentPresenter Grid.Column="0"
+                                    IsHitTestVisible="False"
+                                    Content="{TemplateBinding SelectionBoxItem}"
+                                    ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                    ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"
+                                    Margin="{TemplateBinding Padding}"
+                                    VerticalAlignment="Center"
+                                    HorizontalAlignment="Left" />
+                  <Path Grid.Column="1"
+                        IsHitTestVisible="False"
+                        Data="M 0 0 L 4 4 L 8 0 Z"
+                        Fill="#9CA3AF"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center" />
+                </Grid>
+              </Border>
+              <Popup x:Name="PART_Popup"
+                     Placement="Bottom"
+                     IsOpen="{TemplateBinding IsDropDownOpen}"
+                     AllowsTransparency="True"
+                     Focusable="False"
+                     PopupAnimation="Slide">
+                <Border MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}"
+                        MaxHeight="{TemplateBinding MaxDropDownHeight}"
+                        Background="#2A2A34"
+                        BorderBrush="#3B3B48"
+                        BorderThickness="1"
+                        CornerRadius="4"
+                        Margin="0,2,0,0"
+                        SnapsToDevicePixels="True">
+                  <ScrollViewer SnapsToDevicePixels="True"
+                                VerticalScrollBarVisibility="Auto"
+                                HorizontalScrollBarVisibility="Disabled">
+                    <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained" />
+                  </ScrollViewer>
+                </Border>
+              </Popup>
+            </Grid>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="ComboBorder" Property="BorderBrush" Value="#4E5873" />
+              </Trigger>
+              <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                <Setter TargetName="ComboBorder" Property="BorderBrush" Value="#3B82F6" />
+              </Trigger>
+              <Trigger Property="IsDropDownOpen" Value="True">
+                <Setter TargetName="ComboBorder" Property="BorderBrush" Value="#3B82F6" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="DialogSecondaryButtonStyle" TargetType="Button">
+      <Setter Property="Width" Value="84" />
+      <Setter Property="Padding" Value="8,6" />
+      <Setter Property="Background" Value="#2A2A34" />
+      <Setter Property="Foreground" Value="#F3F4F6" />
+      <Setter Property="BorderBrush" Value="#3B3B48" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="4"
+                    Padding="{TemplateBinding Padding}"
+                    SnapsToDevicePixels="True">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+      <Style.Triggers>
+        <Trigger Property="IsMouseOver" Value="True">
+          <Setter Property="Background" Value="#32384A" />
+          <Setter Property="BorderBrush" Value="#4E5873" />
+        </Trigger>
+        <Trigger Property="IsKeyboardFocused" Value="True">
+          <Setter Property="BorderBrush" Value="#3B82F6" />
+        </Trigger>
+      </Style.Triggers>
+    </Style>
+
+    <Style x:Key="DialogPrimaryButtonStyle" TargetType="Button">
+      <Setter Property="Width" Value="84" />
+      <Setter Property="Padding" Value="8,6" />
+      <Setter Property="Background" Value="#2563EB" />
+      <Setter Property="Foreground" Value="#FFFFFF" />
+      <Setter Property="BorderBrush" Value="#3B82F6" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="4"
+                    Padding="{TemplateBinding Padding}"
+                    SnapsToDevicePixels="True">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+      <Style.Triggers>
+        <Trigger Property="IsMouseOver" Value="True">
+          <Setter Property="Background" Value="#1D4ED8" />
+        </Trigger>
+        <Trigger Property="IsKeyboardFocused" Value="True">
+          <Setter Property="BorderBrush" Value="#93C5FD" />
+        </Trigger>
+      </Style.Triggers>
+    </Style>
+  </Window.Resources>
+
   <StackPanel Margin="18">
-    <TextBlock Text="Base URL" Foreground="#D1D5DB" Margin="0,0,0,4" />
+    <TextBlock Text="Shortcut" Foreground="#D1D5DB" Margin="0,0,0,4" />
+    <Button x:Name="ShortcutButton"
+            Style="{StaticResource ShortcutButtonStyle}"
+            HorizontalAlignment="Right"
+            MinWidth="120"
+            Margin="0,0,0,10"
+            Click="OnShortcutButtonClick"
+            LostKeyboardFocus="OnShortcutButtonLostKeyboardFocus" />
+    <TextBlock x:Name="ShortcutErrorText"
+               Text="That shortcut is already in use."
+               Foreground="#F87171"
+               FontSize="12"
+               TextWrapping="Wrap"
+               Visibility="Collapsed"
+               Margin="0,4,0,0" />
+
+    <TextBlock Text="Default language" Foreground="#D1D5DB" Margin="0,12,0,4" />
+    <ComboBox x:Name="DefaultLanguageCombo"
+              IsEditable="False"
+              Style="{StaticResource DarkComboBoxStyle}" />
+
+    <TextBlock Text="Base URL" Foreground="#D1D5DB" Margin="0,12,0,4" />
     <TextBox x:Name="BaseUrlBox"
-             Background="#141419"
-             Foreground="#F3F4F6"
-             CaretBrush="#F3F4F6"
-             BorderBrush="#3B3B48"
-             Padding="8,6"
-             Margin="0,0,0,12" />
+             Style="{StaticResource DarkTextBoxStyle}" />
 
-    <TextBlock Text="Model" Foreground="#D1D5DB" Margin="0,0,0,4" />
+    <TextBlock Text="Model" Foreground="#D1D5DB" Margin="0,12,0,4" />
     <TextBox x:Name="ModelBox"
-             Background="#141419"
-             Foreground="#F3F4F6"
-             CaretBrush="#F3F4F6"
-             BorderBrush="#3B3B48"
-             Padding="8,6"
-             Margin="0,0,0,12" />
-
-    <TextBlock Text="Global Hotkey (e.g. Ctrl+Alt+E)" Foreground="#D1D5DB" Margin="0,0,0,4" />
-    <TextBox x:Name="HotkeyBox"
-             Background="#141419"
-             Foreground="#F3F4F6"
-             CaretBrush="#F3F4F6"
-             BorderBrush="#3B3B48"
-             Padding="8,6"
-             Margin="0,0,0,12" />
+             Style="{StaticResource DarkTextBoxStyle}" />
 
     <Border Background="#141419"
             BorderBrush="#2C2C36"
             BorderThickness="1"
             CornerRadius="6"
             Padding="10,8"
-            Margin="0,0,0,12">
+            Margin="0,12,0,12">
       <StackPanel>
-        <TextBlock x:Name="EngineStatusText" Foreground="#9CA3AF" FontSize="12" />
-        <TextBlock x:Name="ApiKeyStatusText" Foreground="#9CA3AF" FontSize="12" Margin="0,4,0,0" />
+        <TextBlock x:Name="EngineStatusText"
+                   Foreground="#9CA3AF"
+                   FontSize="12"
+                   TextWrapping="Wrap" />
+        <TextBlock x:Name="ApiKeyStatusText"
+                   Foreground="#9CA3AF"
+                   FontSize="12"
+                   Margin="0,4,0,0"
+                   TextWrapping="Wrap" />
       </StackPanel>
     </Border>
 
@@ -59,21 +358,13 @@
 
     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
       <Button Content="Cancel"
-              Width="84"
-              Padding="8,6"
               Margin="0,0,8,0"
               IsCancel="True"
-              Background="#2A2A34"
-              Foreground="#F3F4F6"
-              BorderBrush="#3B3B48"
+              Style="{StaticResource DialogSecondaryButtonStyle}"
               Click="OnCancelClick" />
       <Button Content="Save"
-              Width="84"
-              Padding="8,6"
               IsDefault="True"
-              Background="#2563EB"
-              Foreground="#FFFFFF"
-              BorderBrush="#3B82F6"
+              Style="{StaticResource DialogPrimaryButtonStyle}"
               Click="OnSaveClick" />
     </StackPanel>
   </StackPanel>

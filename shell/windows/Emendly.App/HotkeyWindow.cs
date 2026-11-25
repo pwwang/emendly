@@ -26,6 +26,7 @@ public sealed class HotkeyWindow : IDisposable
 
     public event EventHandler? HotkeyPressed;
     public event EventHandler? ActivateRequested;
+    public event EventHandler? OpenSettingsRequested;
 
     public string? RegisteredHotkey { get; private set; }
 
@@ -66,7 +67,7 @@ public sealed class HotkeyWindow : IDisposable
         _source.AddHook(WndProc);
     }
 
-    public static bool NotifyExistingInstance()
+    public static bool NotifyExistingInstance(bool openSettings = false)
     {
         if (ActivateMessage == 0)
         {
@@ -79,7 +80,7 @@ public sealed class HotkeyWindow : IDisposable
             return false;
         }
 
-        return PostMessage(hwnd, ActivateMessage, IntPtr.Zero, IntPtr.Zero);
+        return PostMessage(hwnd, ActivateMessage, openSettings ? new IntPtr(1) : IntPtr.Zero, IntPtr.Zero);
     }
 
     public bool Register(string hotkeySpec, out string? error)
@@ -299,7 +300,14 @@ public sealed class HotkeyWindow : IDisposable
         else if (ActivateMessage != 0 && (uint)msg == ActivateMessage)
         {
             handled = true;
-            ActivateRequested?.Invoke(this, EventArgs.Empty);
+            if (wParam != IntPtr.Zero)
+            {
+                OpenSettingsRequested?.Invoke(this, EventArgs.Empty);
+            }
+            else
+            {
+                ActivateRequested?.Invoke(this, EventArgs.Empty);
+            }
         }
 
         return IntPtr.Zero;
