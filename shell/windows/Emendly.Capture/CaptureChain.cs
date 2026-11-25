@@ -15,7 +15,7 @@ public static class CaptureChain
         { ScintillaStrategy, UiaStrategy };
 
     private static readonly ICaptureStrategy[] ClipboardFallbackChain =
-        { UiaStrategy, ScintillaStrategy, ClipboardStrategy };
+        { ClipboardStrategy, UiaStrategy, ScintillaStrategy };
 
     private static readonly ICaptureStrategy[] UiaOnlyChain =
         { UiaStrategy };

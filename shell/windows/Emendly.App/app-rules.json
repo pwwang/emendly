@@ -1,5 +1,5 @@
 {
-  "notepad3.exe": "scintilla",
-  "notepad++.exe": "scintilla",
+  "notepad3.exe": "clipboard",
+  "notepad++.exe": "clipboard",
   "windowsterminal.exe": "clipboard"
 }
