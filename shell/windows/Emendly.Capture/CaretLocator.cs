@@ -73,6 +73,36 @@ public static class CaretLocator
         return new CaretLocation(new Rect(200, 200, 1, 1), FromCaret: false);
     }
 
+    internal static bool TryClientCaretToScreen(
+        IntPtr hwnd,
+        int clientX,
+        int clientY,
+        int height,
+        out Rect bounds)
+    {
+        bounds = Rect.Empty;
+
+        if (hwnd == IntPtr.Zero || !WindowEnumerator.GetClientRect(hwnd, out var clientRect))
+        {
+            return false;
+        }
+
+        if (clientX < clientRect.Left || clientX > clientRect.Right
+            || clientY < clientRect.Top || clientY > clientRect.Bottom)
+        {
+            return false;
+        }
+
+        var pt = new POINT { X = clientX, Y = clientY };
+        if (!ClientToScreen(hwnd, ref pt))
+        {
+            return false;
+        }
+
+        bounds = new Rect(pt.X, pt.Y, 1, Math.Max(1, height));
+        return true;
+    }
+
     public static MonitorWorkArea GetMonitorWorkArea(double physicalX, double physicalY)
     {
         var pt = new POINT

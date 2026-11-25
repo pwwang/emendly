@@ -46,6 +46,8 @@ public partial class PanelWindow : Window
 
     private readonly WindowInfo _targetWindow;
     private readonly IntPtr _targetHwnd;
+    private readonly string _strategyName;
+    private readonly IntPtr _editorHwnd;
     private readonly SelectionClassification _classification;
     private readonly SurroundingContext? _surroundingContext;
     private readonly CaretLocation _caretLocation;
@@ -89,12 +91,16 @@ public partial class PanelWindow : Window
         AppSettings settings,
         ITransformer transformer,
         ClipboardInserter inserter,
-        string? unsupportedReason)
+        string? unsupportedReason,
+        string strategyName = "uia",
+        IntPtr editorHwnd = default)
     {
         InitializeComponent();
 
         _targetWindow = targetWindow;
         _targetHwnd = targetWindow.Hwnd;
+        _strategyName = strategyName;
+        _editorHwnd = editorHwnd;
         _classification = classification;
         _surroundingContext = surroundingContext;
         _caretLocation = caretLocation;
@@ -1471,7 +1477,9 @@ public partial class PanelWindow : Window
                 actionName: _activeAction,
                 textToInsert: textToInsert,
                 replacedText: hasSelection ? _classification.UntrimmedText : string.Empty,
-                wasSelection: hasSelection);
+                wasSelection: hasSelection,
+                strategyName: _strategyName,
+                editorHwnd: _editorHwnd);
 
             sw.Stop();
             ShellLogger.LogAction(

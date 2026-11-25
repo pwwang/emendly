@@ -46,6 +46,10 @@ public static class WindowEnumerator
     private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
 
     [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool EnumChildWindows(IntPtr hWndParent, EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    [DllImport("user32.dll")]
     internal static extern IntPtr GetForegroundWindow();
 
     [DllImport("user32.dll")]
@@ -66,7 +70,15 @@ public static class WindowEnumerator
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool IsWindowVisible(IntPtr hWnd);
+    internal static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool IsWindowEnabled(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool GetClientRect(IntPtr hWnd, out RECT lpRect);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int GetWindowTextLength(IntPtr hWnd);
@@ -248,6 +260,27 @@ public static class WindowEnumerator
         return IntPtr.Zero;
     }
 
+    internal static IReadOnlyList<IntPtr> EnumerateChildWindowsByClass(IntPtr parentHwnd, string className)
+    {
+        var matches = new List<IntPtr>();
+        if (parentHwnd == IntPtr.Zero || !IsWindow(parentHwnd) || string.IsNullOrEmpty(className))
+        {
+            return matches;
+        }
+
+        EnumChildWindows(parentHwnd, (childHwnd, _) =>
+        {
+            if (string.Equals(GetWindowClassName(childHwnd), className, StringComparison.OrdinalIgnoreCase))
+            {
+                matches.Add(childHwnd);
+            }
+
+            return true;
+        }, IntPtr.Zero);
+
+        return matches;
+    }
+
     private static string GetWindowTitle(IntPtr hwnd)
     {
         var length = GetWindowTextLength(hwnd);
@@ -261,7 +294,7 @@ public static class WindowEnumerator
         return copied > 0 ? buffer.ToString() : string.Empty;
     }
 
-    private static string GetWindowClassName(IntPtr hwnd)
+    internal static string GetWindowClassName(IntPtr hwnd)
     {
         var buffer = new StringBuilder(256);
         var copied = GetClassName(hwnd, buffer, buffer.Capacity);

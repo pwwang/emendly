@@ -91,7 +91,8 @@ internal static class Program
             return ExitNoWindow;
         }
 
-        var outcome = UiaProbe.ProbeWithTimeout(window, ProbeTimeout);
+        var rules = AppCaptureRules.LoadDefault();
+        var outcome = CaptureChain.ProbeWithTimeout(window, rules, ProbeTimeout);
         if (outcome.TimedOut)
         {
             Console.WriteLine(ProbeJson.SerializeError("timeout"));
@@ -122,6 +123,11 @@ internal static class Program
     {
         Console.WriteLine($"Window:      {report.Hwnd} ({report.Process}, class={report.WindowClass}) \"{report.Title}\"");
         Console.WriteLine($"Verdict:     {report.Verdict}");
+        Console.WriteLine($"Strategy:    {report.Strategy}");
+        if (report.AmbiguousView == true)
+        {
+            Console.WriteLine("View:        ambiguous (multiple views, fell back to first)");
+        }
 
         if (report.Element is not null)
         {

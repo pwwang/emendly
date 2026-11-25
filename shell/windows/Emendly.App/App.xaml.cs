@@ -19,6 +19,7 @@ public partial class App : Application
     private Mutex? _instanceMutex;
     private bool _ownsMutex;
     private AppSettings _settings = new();
+    private AppCaptureRules _captureRules = AppCaptureRules.Empty;
     private ITransformer? _transformer;
     private HotkeyWindow? _hotkeyWindow;
     private Forms.NotifyIcon? _trayIcon;
@@ -46,6 +47,7 @@ public partial class App : Application
         }
 
         _settings = AppSettings.Load();
+        _captureRules = AppCaptureRules.LoadDefault();
         _transformer = CreateTransformer(_settings);
 
         InitializeTrayIcon();
@@ -158,24 +160,28 @@ public partial class App : Application
         _probeInFlight = true;
         try
         {
-            var outcome = await Task.Run(() => UiaProbe.CaptureWithTimeout(foreground, ProbeTimeout));
+            var outcome = await Task.Run(() => CaptureChain.CaptureWithTimeout(foreground, _captureRules, ProbeTimeout));
 
             if (outcome.TimedOut)
             {
-                ShellLogger.LogMeta("probe", foreground.ProcessName, "timeout");
+                ShellLogger.LogProbe(foreground.ProcessName, "timeout", "none");
                 ShowNotice(foreground.ProcessName, "Timed out probing the focused text field.", CaretLocator.GetMouseFallback());
                 return;
             }
 
             if (outcome.Snapshot is null)
             {
-                ShellLogger.LogMeta("probe", foreground.ProcessName, "error");
+                ShellLogger.LogProbe(foreground.ProcessName, "error", "none");
                 ShowNotice(foreground.ProcessName, outcome.ErrorMessage ?? "Could not inspect the focused window.", CaretLocator.GetMouseFallback());
                 return;
             }
 
             var snapshot = outcome.Snapshot;
-            ShellLogger.LogMeta("probe", foreground.ProcessName, snapshot.Report.Verdict);
+            ShellLogger.LogProbe(
+                foreground.ProcessName,
+                snapshot.Report.Verdict,
+                snapshot.StrategyName,
+                snapshot.AmbiguousView);
 
             switch (snapshot.Report.Verdict)
             {
@@ -244,7 +250,9 @@ public partial class App : Application
             settings: _settings,
             transformer: _transformer,
             inserter: _inserter,
-            unsupportedReason: unsupportedReason);
+            unsupportedReason: unsupportedReason,
+            strategyName: snapshot.StrategyName,
+            editorHwnd: snapshot.EditorHwnd);
 
         panel.PasteCompleted += (_, _) => UpdateUndoMenuItem();
         panel.ActivationFailed += (_, _) => ShowNotice(

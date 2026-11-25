@@ -282,6 +282,34 @@ public static class ShellLogger
         Append(record);
     }
 
+    public static void LogProbe(
+        string processName,
+        string status,
+        string strategy,
+        bool ambiguousView = false)
+    {
+        var record = ambiguousView
+            ? JsonSerializer.Serialize(new
+            {
+                ts = DateTimeOffset.UtcNow.ToString("O"),
+                @event = "probe",
+                app = processName,
+                status,
+                strategy,
+                ambiguous_view = true,
+            })
+            : JsonSerializer.Serialize(new
+            {
+                ts = DateTimeOffset.UtcNow.ToString("O"),
+                @event = "probe",
+                app = processName,
+                status,
+                strategy,
+            });
+
+        Append(record);
+    }
+
     public static void LogFocus(string targetProcess)
     {
         var record = JsonSerializer.Serialize(new

@@ -17,7 +17,10 @@ public sealed record CaptureSnapshot(
     string SelectedText,
     string FieldContext,
     CaretLocation CaretLocation,
-    SurroundingContext? SurroundingContext = null);
+    SurroundingContext? SurroundingContext = null,
+    string StrategyName = "none",
+    IntPtr EditorHwnd = default,
+    bool AmbiguousView = false);
 
 public sealed record CaptureOutcome(CaptureSnapshot? Snapshot, bool TimedOut, string? ErrorMessage)
 {
@@ -52,7 +55,7 @@ public static class UiaProbe
     public static CaptureOutcome CaptureWithTimeout(WindowInfo window, TimeSpan timeout) =>
         ExecuteWithTimeout(window, timeout, includeTextDetails: true);
 
-    private static CaptureOutcome ExecuteWithTimeout(WindowInfo window, TimeSpan timeout, bool includeTextDetails)
+    internal static CaptureOutcome ExecuteWithTimeout(WindowInfo window, TimeSpan timeout, bool includeTextDetails)
     {
         CaptureSnapshot? snapshot = null;
         Exception? failure = null;
@@ -152,7 +155,8 @@ public static class UiaProbe
             Selection: selection,
             Caret: caret,
             FieldTextLength: fieldTextLength,
-            Verdict: verdict);
+            Verdict: verdict,
+            Strategy: "uia");
 
         var caretLocation = includeTextDetails
             ? CaretLocator.Locate(primarySelection, window.Hwnd)
@@ -168,20 +172,22 @@ public static class UiaProbe
 
         return new CaptureSnapshot(
             Report: report,
-            SelectedText: includeTextDetails ? selectedText : string.Empty,
+            SelectedText: selectedText,
             FieldContext: fieldContext,
             CaretLocation: caretLocation,
-            SurroundingContext: surroundingContext);
+            SurroundingContext: surroundingContext,
+            StrategyName: "uia");
     }
 
-    private static CaptureSnapshot UnsupportedSnapshot(WindowInfo window, bool includeTextDetails) =>
+    internal static CaptureSnapshot UnsupportedSnapshot(WindowInfo window, bool includeTextDetails) =>
         new(
             Report: UnsupportedReport(window),
             SelectedText: string.Empty,
             FieldContext: string.Empty,
             CaretLocation: includeTextDetails
                 ? CaretLocator.Locate(null, window.Hwnd)
-                : CaretLocator.GetMouseFallback());
+                : CaretLocator.GetMouseFallback(),
+            StrategyName: "none");
 
     private static AutomationElement? ResolveTextElement(
         AutomationElement windowElement,
@@ -421,7 +427,7 @@ public static class UiaProbe
         return selectionLength > 0 ? "selection" : "caret";
     }
 
-    private static ProbeReport UnsupportedReport(WindowInfo window) =>
+    internal static ProbeReport UnsupportedReport(WindowInfo window) =>
         new(
             Hwnd: WindowEnumerator.FormatHwnd(window.Hwnd),
             Process: window.ProcessName,
@@ -434,7 +440,8 @@ public static class UiaProbe
             Selection: new SelectionInfo(0, string.Empty),
             Caret: new CaretInfo(false, null),
             FieldTextLength: 0,
-            Verdict: "unsupported");
+            Verdict: "unsupported",
+            Strategy: "none");
 
     private static TextPattern? TryGetTextPattern(AutomationElement element) =>
         SafeCall<TextPattern?>(() =>

@@ -14,4 +14,10 @@
     <ProjectReference Include="..\Emendly.Capture\Emendly.Capture.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="..\Emendly.App\app-rules.json" Link="app-rules.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>

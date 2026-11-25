@@ -32,6 +32,8 @@ public sealed record ProbeReport(
     [property: JsonPropertyName("caret")] CaretInfo Caret,
     [property: JsonPropertyName("field_text_length")] int FieldTextLength,
     [property: JsonPropertyName("verdict")] string Verdict,
+    [property: JsonPropertyName("strategy")] string Strategy = "none",
+    [property: JsonPropertyName("ambiguous_view"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? AmbiguousView = null,
     [property: JsonPropertyName("error"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Error = null);
 
 public sealed record ProbeErrorReport(

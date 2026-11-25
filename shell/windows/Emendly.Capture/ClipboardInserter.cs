@@ -1,6 +1,4 @@
-using System.IO;
-using System.Runtime.InteropServices;
-using System.Windows;
+using Emendly.Capture.Scintilla;
 
 namespace Emendly.Capture;
 
@@ -10,75 +8,16 @@ public sealed record UndoEntry(
     string ActionName,
     string ReplacedText,
     string InsertedText,
-    bool WasSelection);
+    bool WasSelection,
+    string StrategyName = "uia",
+    IntPtr EditorHwnd = default);
 
 public sealed class ClipboardInserter
 {
-    private const uint InputKeyboard = 1;
-    private const uint KeyEventKeyUp = 0x0002;
-    private const uint MapVkToVsc = 0;
-    private const ushort VkControl = 0x11;
-    private const ushort VkV = 0x56;
-    private const ushort VkZ = 0x5A;
-
-    private const int ClipboardRetryCount = 12;
-    private const int ClipboardRetryDelayMs = 15;
     private const int FocusSettleDelayMs = 60;
     private const int ForegroundPollIntervalMs = 20;
     private const int ForegroundWaitTimeoutMs = 300;
     private const int PasteConsumeDelayMs = 150;
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct INPUT
-    {
-        public uint Type;
-        public INPUTUNION Union;
-    }
-
-    [StructLayout(LayoutKind.Explicit)]
-    private struct INPUTUNION
-    {
-        [FieldOffset(0)] public MOUSEINPUT Mouse;
-        [FieldOffset(0)] public KEYBDINPUT Keyboard;
-        [FieldOffset(0)] public HARDWAREINPUT Hardware;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MOUSEINPUT
-    {
-        public int Dx;
-        public int Dy;
-        public uint MouseData;
-        public uint Flags;
-        public uint Time;
-        public IntPtr ExtraInfo;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct KEYBDINPUT
-    {
-        public ushort VirtualKey;
-        public ushort ScanCode;
-        public uint Flags;
-        public uint Time;
-        public IntPtr ExtraInfo;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct HARDWAREINPUT
-    {
-        public uint Msg;
-        public ushort ParamL;
-        public ushort ParamH;
-    }
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
-
-    [DllImport("user32.dll")]
-    private static extern uint MapVirtualKey(uint uCode, uint uMapType);
-
-    private sealed record ClipboardSnapshot(bool WasEmpty, Dictionary<string, object> Formats);
 
     public UndoEntry? LastUndo { get; private set; }
 
@@ -91,7 +30,7 @@ public sealed class ClipboardInserter
             return Task.CompletedTask;
         }
 
-        return SetClipboardTextAsync(text);
+        return ClipboardHelper.SetTextAsync(text);
     }
 
     public async Task<bool> PasteAsync(
@@ -101,6 +40,8 @@ public sealed class ClipboardInserter
         string textToInsert,
         string replacedText,
         bool wasSelection,
+        string strategyName = "uia",
+        IntPtr editorHwnd = default,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(textToInsert) || !WindowEnumerator.IsWindowAlive(targetHwnd))
@@ -108,11 +49,25 @@ public sealed class ClipboardInserter
             return false;
         }
 
-        var snapshot = await CaptureClipboardSnapshotAsync().ConfigureAwait(true);
+        if (string.Equals(strategyName, ScintillaCaptureStrategy.StrategyId, StringComparison.Ordinal)
+            && editorHwnd != IntPtr.Zero)
+        {
+            return await PasteScintillaAsync(
+                targetHwnd,
+                editorHwnd,
+                processName,
+                actionName,
+                textToInsert,
+                replacedText,
+                wasSelection,
+                cancellationToken).ConfigureAwait(true);
+        }
+
+        var snapshot = await ClipboardHelper.CaptureSnapshotAsync().ConfigureAwait(true);
 
         try
         {
-            await SetClipboardTextAsync(textToInsert).ConfigureAwait(true);
+            await ClipboardHelper.SetTextAsync(textToInsert).ConfigureAwait(true);
 
             // SetForegroundWindow can be refused while another process holds the foreground
             // lock, so ask and then wait for the change instead of trusting the return value.
@@ -130,7 +85,7 @@ public sealed class ClipboardInserter
                 return false;
             }
 
-            if (!SendCtrlChord(VkV))
+            if (!ClipboardHelper.SendCtrlChord(ClipboardHelper.VkV))
             {
                 return false;
             }
@@ -143,13 +98,62 @@ public sealed class ClipboardInserter
                 ActionName: actionName,
                 ReplacedText: replacedText,
                 InsertedText: textToInsert,
-                WasSelection: wasSelection);
+                WasSelection: wasSelection,
+                StrategyName: strategyName,
+                EditorHwnd: editorHwnd);
 
             return true;
         }
         finally
         {
-            await RestoreClipboardSnapshotAsync(snapshot).ConfigureAwait(true);
+            await ClipboardHelper.RestoreSnapshotAsync(snapshot).ConfigureAwait(true);
+        }
+    }
+
+    private async Task<bool> PasteScintillaAsync(
+        IntPtr targetHwnd,
+        IntPtr editorHwnd,
+        string processName,
+        string actionName,
+        string textToInsert,
+        string replacedText,
+        bool wasSelection,
+        CancellationToken cancellationToken)
+    {
+        if (!WindowEnumerator.IsWindowAlive(editorHwnd))
+        {
+            return false;
+        }
+
+        var snapshot = await ClipboardHelper.CaptureSnapshotAsync().ConfigureAwait(true);
+
+        try
+        {
+            await ClipboardHelper.SetTextAsync(textToInsert).ConfigureAwait(true);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (!ScintillaCaptureStrategy.SendPaste(editorHwnd))
+            {
+                return false;
+            }
+
+            _ = WindowEnumerator.RestoreForeground(targetHwnd);
+
+            LastUndo = new UndoEntry(
+                TargetHwnd: targetHwnd,
+                ProcessName: processName,
+                ActionName: actionName,
+                ReplacedText: replacedText,
+                InsertedText: textToInsert,
+                WasSelection: wasSelection,
+                StrategyName: ScintillaCaptureStrategy.StrategyId,
+                EditorHwnd: editorHwnd);
+
+            return true;
+        }
+        finally
+        {
+            await ClipboardHelper.RestoreSnapshotAsync(snapshot).ConfigureAwait(true);
         }
     }
 
@@ -180,6 +184,20 @@ public sealed class ClipboardInserter
             return false;
         }
 
+        if (string.Equals(entry.StrategyName, ScintillaCaptureStrategy.StrategyId, StringComparison.Ordinal)
+            && entry.EditorHwnd != IntPtr.Zero
+            && WindowEnumerator.IsWindowAlive(entry.EditorHwnd))
+        {
+            if (!ScintillaCaptureStrategy.SendUndo(entry.EditorHwnd))
+            {
+                return false;
+            }
+
+            _ = WindowEnumerator.RestoreForeground(entry.TargetHwnd);
+            LastUndo = null;
+            return true;
+        }
+
         if (!WindowEnumerator.RestoreForeground(entry.TargetHwnd))
         {
             return false;
@@ -187,220 +205,12 @@ public sealed class ClipboardInserter
 
         await Task.Delay(FocusSettleDelayMs).ConfigureAwait(true);
 
-        if (!SendCtrlChord(VkZ))
+        if (!ClipboardHelper.SendCtrlChord(ClipboardHelper.VkZ))
         {
             return false;
         }
 
         LastUndo = null;
         return true;
-    }
-
-    private static async Task<ClipboardSnapshot> CaptureClipboardSnapshotAsync()
-    {
-        for (var attempt = 0; attempt < ClipboardRetryCount; attempt++)
-        {
-            try
-            {
-                return RunOnSta(ReadClipboardSnapshot);
-            }
-            catch (COMException) when (attempt + 1 < ClipboardRetryCount)
-            {
-                await Task.Delay(ClipboardRetryDelayMs).ConfigureAwait(true);
-            }
-        }
-
-        return new ClipboardSnapshot(WasEmpty: true, Formats: new Dictionary<string, object>());
-    }
-
-    private static ClipboardSnapshot ReadClipboardSnapshot()
-    {
-        var dataObject = Clipboard.GetDataObject();
-        if (dataObject is null)
-        {
-            return new ClipboardSnapshot(WasEmpty: true, Formats: new Dictionary<string, object>());
-        }
-
-        var formatNames = dataObject.GetFormats(autoConvert: false);
-        if (formatNames is null || formatNames.Length == 0)
-        {
-            return new ClipboardSnapshot(WasEmpty: true, Formats: new Dictionary<string, object>());
-        }
-
-        var saved = new Dictionary<string, object>(StringComparer.Ordinal);
-        foreach (var format in formatNames)
-        {
-            try
-            {
-                var data = dataObject.GetData(format, autoConvert: false);
-                if (data is null)
-                {
-                    continue;
-                }
-
-                // Copy streams eagerly so the COM-backed clipboard buffer can be replaced safely.
-                if (data is MemoryStream ms)
-                {
-                    saved[format] = ms.ToArray();
-                }
-                else
-                {
-                    saved[format] = data;
-                }
-            }
-            catch (Exception)
-            {
-                // Skip delayed-render or non-serializable formats rather than aborting capture.
-            }
-        }
-
-        if (saved.Count == 0 && Clipboard.ContainsText())
-        {
-            saved[DataFormats.UnicodeText] = Clipboard.GetText(TextDataFormat.UnicodeText);
-        }
-
-        return new ClipboardSnapshot(WasEmpty: saved.Count == 0, Formats: saved);
-    }
-
-    private static async Task SetClipboardTextAsync(string text)
-    {
-        for (var attempt = 0; attempt < ClipboardRetryCount; attempt++)
-        {
-            try
-            {
-                RunOnSta(() =>
-                {
-                    Clipboard.SetText(text, TextDataFormat.UnicodeText);
-                    return true;
-                });
-                return;
-            }
-            catch (COMException) when (attempt + 1 < ClipboardRetryCount)
-            {
-                await Task.Delay(ClipboardRetryDelayMs).ConfigureAwait(true);
-            }
-        }
-
-        throw new InvalidOperationException("Failed to write clipboard.");
-    }
-
-    private static async Task RestoreClipboardSnapshotAsync(ClipboardSnapshot snapshot)
-    {
-        for (var attempt = 0; attempt < ClipboardRetryCount; attempt++)
-        {
-            try
-            {
-                RunOnSta(() =>
-                {
-                    if (snapshot.WasEmpty || snapshot.Formats.Count == 0)
-                    {
-                        Clipboard.Clear();
-                        return true;
-                    }
-
-                    var restored = new DataObject();
-                    foreach (var (format, value) in snapshot.Formats)
-                    {
-                        try
-                        {
-                            if (value is byte[] bytes)
-                            {
-                                restored.SetData(format, new MemoryStream(bytes, writable: false), autoConvert: false);
-                            }
-                            else
-                            {
-                                restored.SetData(format, value, autoConvert: false);
-                            }
-                        }
-                        catch (Exception)
-                        {
-                            // Skip individual formats that refuse re-insertion.
-                        }
-                    }
-
-                    Clipboard.SetDataObject(restored, copy: true);
-                    return true;
-                });
-                return;
-            }
-            catch (COMException) when (attempt + 1 < ClipboardRetryCount)
-            {
-                await Task.Delay(ClipboardRetryDelayMs).ConfigureAwait(true);
-            }
-            catch (Exception)
-            {
-                return;
-            }
-        }
-    }
-
-    private static bool SendCtrlChord(ushort keyVk)
-    {
-        var ctrlScan = (ushort)MapVirtualKey(VkControl, MapVkToVsc);
-        var keyScan = (ushort)MapVirtualKey(keyVk, MapVkToVsc);
-
-        var inputs = new[]
-        {
-            KeyInput(VkControl, ctrlScan, 0),
-            KeyInput(keyVk, keyScan, 0),
-            KeyInput(keyVk, keyScan, KeyEventKeyUp),
-            KeyInput(VkControl, ctrlScan, KeyEventKeyUp),
-        };
-
-        var sent = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
-        return sent == inputs.Length;
-    }
-
-    private static INPUT KeyInput(ushort vk, ushort scanCode, uint flags) =>
-        new()
-        {
-            Type = InputKeyboard,
-            Union = new INPUTUNION
-            {
-                Keyboard = new KEYBDINPUT
-                {
-                    VirtualKey = vk,
-                    ScanCode = scanCode,
-                    Flags = flags,
-                    Time = 0,
-                    ExtraInfo = IntPtr.Zero,
-                },
-            },
-        };
-
-    private static T RunOnSta<T>(Func<T> func)
-    {
-        if (Thread.CurrentThread.GetApartmentState() == ApartmentState.STA)
-        {
-            return func();
-        }
-
-        T result = default!;
-        Exception? failure = null;
-        var thread = new Thread(() =>
-        {
-            try
-            {
-                result = func();
-            }
-            catch (Exception ex)
-            {
-                failure = ex;
-            }
-        })
-        {
-            IsBackground = true,
-            Name = "Emendly.ClipboardSta",
-        };
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        thread.Join();
-
-        if (failure is not null)
-        {
-            throw failure;
-        }
-
-        return result;
     }
 }
