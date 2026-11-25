@@ -206,9 +206,13 @@ pub fn resolve_actions_dir() -> Result<PathBuf, EngineError> {
     let mut candidates = vec![PathBuf::from("actions"), PathBuf::from("engine/actions")];
     if let Ok(exe) = env::current_exe() {
         if let Some(dir) = exe.parent() {
+            // engine/actions (shipped layout) and engine/../actions (portable layout)
             candidates.push(dir.join("actions"));
-            if let Some(crate_dir) = dir.parent().and_then(Path::parent) {
-                candidates.push(crate_dir.join("actions"));
+            if let Some(parent) = dir.parent() {
+                candidates.push(parent.join("actions"));
+                if let Some(grandparent) = parent.parent() {
+                    candidates.push(grandparent.join("actions"));
+                }
             }
         }
     }
@@ -217,7 +221,12 @@ pub fn resolve_actions_dir() -> Result<PathBuf, EngineError> {
     candidates
         .into_iter()
         .find(|p| p.is_dir())
-        .ok_or_else(|| EngineError::Internal("could not locate actions directory".into()))
+        .ok_or_else(|| {
+            EngineError::Internal(
+                "could not locate actions directory: expected an actions/ folder beside the                  emendly-engine binary (set EMENDLY_ACTIONS_DIR to override)"
+                    .into(),
+            )
+        })
 }
 
 #[cfg(test)]

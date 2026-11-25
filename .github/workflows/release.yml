@@ -44,17 +44,18 @@ jobs:
       - name: Build engine (release)
         run: cargo build --manifest-path engine/Cargo.toml --release --locked
 
-      - name: Stage engine binary
+      - name: Stage engine binary and prompt templates
         shell: bash
         run: |
-          mkdir -p dist-engine
+          mkdir -p dist-engine/actions
           cp "engine/target/release/${{ matrix.bin_name }}" "dist-engine/${{ matrix.bin_name }}"
+          cp engine/actions/*.toml dist-engine/actions/
 
       - name: Upload engine artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
-          path: dist-engine/${{ matrix.bin_name }}
+          path: dist-engine/
           if-no-files-found: error
 
   shell:
@@ -113,6 +114,21 @@ jobs:
           name: engine-win-x64
           path: stage/Emendly/engine
 
+      # The engine resolves templates from <exe dir>/../actions as well as
+      # <exe dir>/actions; keep them beside the binary for a portable layout.
+      - name: Ensure prompt templates sit beside the engine
+        shell: pwsh
+        run: |
+          $src = "stage/Emendly/engine/actions"
+          if (-not (Test-Path $src)) {
+            throw "Engine artifact is missing its actions/ directory"
+          }
+          $count = (Get-ChildItem $src -Filter *.toml | Measure-Object).Count
+          if ($count -lt 9) {
+            throw "Expected 9 prompt templates, found $count"
+          }
+          Write-Host "Prompt templates: $count"
+
       - name: Verify bundle layout and create zip
         shell: pwsh
         run: |
@@ -120,6 +136,10 @@ jobs:
           $required = @(
             "stage/Emendly/Emendly.App.exe",
             "stage/Emendly/engine/emendly-engine.exe",
+            "stage/Emendly/engine/actions/proofread.toml",
+            "stage/Emendly/engine/actions/rewrite.toml",
+            "stage/Emendly/engine/actions/compose.toml",
+            "stage/Emendly/engine/actions/translate.toml",
             "stage/Emendly/Assets/emendly.ico",
             "stage/Emendly/appsettings.json",
             "stage/Emendly/app-rules.json"
