@@ -4,12 +4,15 @@ public sealed class ClipboardCaptureStrategy : ICaptureStrategy
 {
     public const string StrategyId = "clipboard";
     public const string ReadOnlyStrategyId = "clipboard-ro";
+    public const string NoKeysStrategyId = "clipboard-nokeys";
 
     private readonly bool _forceReadOnly;
+    private readonly bool _allowKeys;
 
-    public ClipboardCaptureStrategy(bool forceReadOnly = false)
+    public ClipboardCaptureStrategy(bool forceReadOnly = false, bool allowKeys = true)
     {
         _forceReadOnly = forceReadOnly;
+        _allowKeys = allowKeys;
     }
     private const int CopyPollIntervalMs = 15;
     private const int CopyWaitTimeoutMs = 150;
@@ -39,17 +42,33 @@ public sealed class ClipboardCaptureStrategy : ICaptureStrategy
 
         try
         {
-            ClipboardHelper.WaitForModifiersReleased();
-
             var seqBefore = ClipboardHelper.GetSequenceNumber();
-            if (!ClipboardHelper.SendCtrlChord(ClipboardHelper.VkC))
-            {
-                return CaptureResult.Unhandled(Name);
-            }
+
+            // WM_COPY needs no keystrokes, so it cannot be mistaken for SIGINT in a
+            // terminal. It works for classic edits and Scintilla; Chromium ignores it.
+            TryMessageCopy(topHwnd);
 
             if (WaitForClipboardChange(seqBefore))
             {
                 selectedText = ClipboardHelper.ReadText();
+            }
+            else if (_allowKeys)
+            {
+                ClipboardHelper.WaitForModifiersReleased();
+
+                if (!ClipboardHelper.SendCtrlChord(ClipboardHelper.VkC))
+                {
+                    return CaptureResult.Unhandled(Name);
+                }
+
+                if (WaitForClipboardChange(seqBefore))
+                {
+                    selectedText = ClipboardHelper.ReadText();
+                }
+            }
+            else
+            {
+                return CaptureResult.Unhandled(Name);
             }
         }
         finally
@@ -96,6 +115,19 @@ public sealed class ClipboardCaptureStrategy : ICaptureStrategy
             FieldContext: options.IncludeContext ? selectedText : string.Empty,
             SurroundingContext: null,
             Report: report);
+    }
+
+    private static void TryMessageCopy(IntPtr topHwnd)
+    {
+        const uint WmCopy = 0x0301;
+
+        var focused = WindowEnumerator.GetFocusedChildHwnd(topHwnd);
+        if (focused != IntPtr.Zero)
+        {
+            WindowEnumerator.SendMessageTimeout(focused, WmCopy);
+        }
+
+        WindowEnumerator.SendMessageTimeout(topHwnd, WmCopy);
     }
 
     private static bool WaitForClipboardChange(uint seqBefore)

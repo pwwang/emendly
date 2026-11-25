@@ -2,6 +2,6 @@
   "notepad3.exe": "clipboard",
   "stirling-pdf.exe": "clipboard-ro",
   "notepad++.exe": "clipboard",
-  "windowsterminal.exe": "clipboard",
+  "windowsterminal.exe": "clipboard-nokeys",
   "code.exe": "clipboard"
 }

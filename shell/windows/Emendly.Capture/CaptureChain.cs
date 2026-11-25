@@ -8,6 +8,7 @@ public static class CaptureChain
     private static readonly ScintillaCaptureStrategy ScintillaStrategy = new();
     private static readonly ClipboardCaptureStrategy ClipboardStrategy = new();
     private static readonly ClipboardCaptureStrategy ClipboardReadOnlyStrategy = new(forceReadOnly: true);
+    private static readonly ClipboardCaptureStrategy ClipboardNoKeysStrategy = new(forceReadOnly: false, allowKeys: false);
 
     private static readonly ICaptureStrategy[] DefaultChain =
         { UiaStrategy, ScintillaStrategy };
@@ -21,6 +22,9 @@ public static class CaptureChain
     private static readonly ICaptureStrategy[] ClipboardReadOnlyChain =
         { ClipboardReadOnlyStrategy, UiaStrategy };
 
+    private static readonly ICaptureStrategy[] ClipboardNoKeysChain =
+        { ClipboardNoKeysStrategy, UiaStrategy };
+
     private static readonly ICaptureStrategy[] UiaOnlyChain =
         { UiaStrategy };
 
@@ -32,6 +36,7 @@ public static class CaptureChain
             ScintillaCaptureStrategy.StrategyId => ScintillaFirstChain,
             ClipboardCaptureStrategy.StrategyId => ClipboardFallbackChain,
             ClipboardCaptureStrategy.ReadOnlyStrategyId => ClipboardReadOnlyChain,
+            ClipboardCaptureStrategy.NoKeysStrategyId => ClipboardNoKeysChain,
             UiaCaptureStrategy.StrategyId => UiaOnlyChain,
             _ => DefaultChain,
         };

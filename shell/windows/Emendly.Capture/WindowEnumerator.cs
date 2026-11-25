@@ -234,6 +234,25 @@ public static class WindowEnumerator
         return new WindowInfo(hwnd, pid, processName, className, title);
     }
 
+    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr SendMessageTimeout(
+        IntPtr hWnd,
+        uint msg,
+        IntPtr wParam,
+        IntPtr lParam,
+        uint flags,
+        uint timeout,
+        out IntPtr result);
+
+    /// <summary>
+    /// Fire a message at a window and never block on a hung target.
+    /// </summary>
+    internal static void SendMessageTimeout(IntPtr hWnd, uint msg)
+    {
+        const uint SmtoAbortIfHung = 0x0002;
+        _ = SendMessageTimeout(hWnd, msg, IntPtr.Zero, IntPtr.Zero, SmtoAbortIfHung, 250, out _);
+    }
+
     internal static IntPtr GetFocusedChildHwnd(IntPtr targetHwnd)
     {
         var threadId = GetWindowThreadProcessId(targetHwnd, out _);
