@@ -376,7 +376,7 @@ public partial class SettingsWindow : Window
 
         if (!HotkeyWindow.TryParseHotkey(_pendingHotkey, out _, out _, out var normalizedHotkey))
         {
-            ShowValidation("Shortcut must be a function key such as F6, or a key with a modifier.");
+            ShowValidation("Shortcut must be a key with a modifier such as Ctrl+Alt+E, or a function key such as F6.");
             return;
         }
 

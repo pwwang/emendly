@@ -89,7 +89,7 @@ public sealed class HotkeyWindow : IDisposable
 
         if (!TryParseHotkey(hotkeySpec, out var modifiers, out var virtualKey, out var normalized))
         {
-            error = $"Invalid hotkey '{hotkeySpec}'. Use a key with a modifier, or a function key such as F6.";
+            error = $"Invalid hotkey '{hotkeySpec}'. Use a key with a modifier (for example Ctrl+Alt+E), or a function key such as F6.";
             return false;
         }
 

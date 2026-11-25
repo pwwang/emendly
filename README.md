@@ -17,7 +17,7 @@
 
 ---
 
-Select a sentence in any app, press **F6**, and Emendly offers the actions that fit what it sees. Nothing is read until you press the key, and nothing is sent anywhere except the model provider you configured.
+Select a sentence in any app, press **Ctrl+Alt+E**, and Emendly offers the actions that fit what it sees. Nothing is read until you press the key, and nothing is sent anywhere except the model provider you configured.
 
 ## Why another writing assistant
 
@@ -93,7 +93,7 @@ Windows apps hide their text in different ways, so the shell tries strategies in
 
 | Key | Action |
 |---|---|
-| `F6` | open or close the panel (configurable) |
+| `Ctrl+Alt+E` | open or close the panel (configurable) |
 | `↑` `↓` | move between actions |
 | `1`–`9` | run an action directly |
 | `Tab` / `←` | expand or collapse the full list |

@@ -19,7 +19,7 @@ public sealed class AppSettings
 {
     public const string DefaultBaseUrl = "https://api.openai.com/v1";
     public const string DefaultModel = "gpt-5-mini";
-    public const string DefaultHotkey = "F6";
+    public const string DefaultHotkey = "Ctrl+Alt+E";
 
     [JsonPropertyName("base_url")]
     public string BaseUrl { get; set; } = DefaultBaseUrl;
