@@ -10,6 +10,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Shapes;
+using System.Windows.Threading;
 using Emendly.Capture;
 
 namespace Emendly.App;
@@ -82,8 +83,8 @@ public partial class PanelWindow : Window
     private bool _contextPreviewExpanded;
     private MenuAction? _highlighted;
     private string _targetLanguage = LanguageSettings.DefaultTargetLanguage;
-    private bool _languagePickerOpen;
-    private bool _updatingLanguageList;
+    private bool _languageDropdownOpen;
+    private bool _languageDropdownCommitted;
     private string? _promptActionId;
     private string? _lastPromptActionId;
     private bool _promptForceOptionsOff;
@@ -193,10 +194,10 @@ public partial class PanelWindow : Window
             return;
         }
 
-        if (_languagePickerOpen)
+        if (_languageDropdownOpen)
         {
-            LanguageSearchBox.Focus();
-            Keyboard.Focus(LanguageSearchBox);
+            LanguageDropdown.Focus();
+            Keyboard.Focus(LanguageDropdown);
             return;
         }
 
@@ -606,7 +607,7 @@ public partial class PanelWindow : Window
 
         row.MouseEnter += (_, _) =>
         {
-            if (_selectedIndex != index)
+            if (!_languageDropdownOpen && _selectedIndex != index)
             {
                 SelectIndex(index);
             }
@@ -941,7 +942,7 @@ public partial class PanelWindow : Window
         if (_optionsFocused)
         {
             parts.Add(_highlighted?.Options == ActionOptionKind.Language
-                ? "Space cycles · Enter picks · Esc back"
+                ? "Enter/Space picks · Esc back"
                 : "Space toggles · Esc back");
         }
         else
@@ -990,14 +991,7 @@ public partial class PanelWindow : Window
         }
     }
 
-    private void CycleLanguage()
-    {
-        _targetLanguage = MenuModel.GetNextLanguage(_targetLanguage);
-        _settings.SetTargetLanguage(_targetLanguage);
-        UpdateRowOptions();
-    }
-
-    private void ToggleOrCycleOption()
+    private void ActivateOption()
     {
         if (_highlighted is null)
         {
@@ -1010,25 +1004,7 @@ public partial class PanelWindow : Window
                 ToggleContext(_highlighted.Id);
                 break;
             case ActionOptionKind.Language:
-                CycleLanguage();
-                break;
-        }
-    }
-
-    private void ConfirmOption()
-    {
-        if (_highlighted is null)
-        {
-            return;
-        }
-
-        switch (_highlighted.Options)
-        {
-            case ActionOptionKind.Language:
-                OpenLanguagePicker();
-                break;
-            case ActionOptionKind.Context:
-                ToggleContext(_highlighted.Id);
+                OpenLanguageDropdown();
                 break;
         }
     }
@@ -1045,113 +1021,111 @@ public partial class PanelWindow : Window
         UpdateMenuHints();
     }
 
-    // ---- Language picker ---------------------------------------------------
+    // ---- Language dropdown -------------------------------------------------
 
-    private void OpenLanguagePicker()
+    private void OpenLanguageDropdown()
     {
-        _languagePickerOpen = true;
-        LanguagePickerOverlay.Visibility = Visibility.Visible;
+        if (_closing || _stage != PanelStage.ChooseAction)
+        {
+            return;
+        }
 
-        _updatingLanguageList = true;
-        LanguageSearchBox.Text = string.Empty;
-        _updatingLanguageList = false;
+        if (_languageDropdownOpen)
+        {
+            CloseLanguageDropdown(commit: false);
+            return;
+        }
 
-        PopulateLanguages(string.Empty);
-        RefreshPanelHeight();
+        var languages = MenuModel.GetLanguages(_targetLanguage);
+        LanguageDropdown.ItemsSource = languages;
+        LanguageDropdown.SelectedIndex = MenuModel.FindLanguageIndex(languages, _targetLanguage);
+
+        _languageDropdownOpen = true;
+        _languageDropdownCommitted = false;
+
+        PositionLanguageDropdown();
+        LanguageDropdownOverlay.Visibility = Visibility.Visible;
+        LanguageDropdownOverlay.UpdateLayout();
+        PositionLanguageDropdown();
 
         _ = Dispatcher.InvokeAsync(() =>
         {
-            if (_languagePickerOpen)
+            if (_closing || !_languageDropdownOpen || _stage != PanelStage.ChooseAction)
             {
-                LanguageSearchBox.Focus();
-                Keyboard.Focus(LanguageSearchBox);
+                return;
             }
-        });
+
+            LanguageDropdown.Focus();
+            Keyboard.Focus(LanguageDropdown);
+            LanguageDropdown.IsDropDownOpen = true;
+        }, DispatcherPriority.Input);
     }
 
-    private void CloseLanguagePicker(bool restoreFocus)
+    private void PositionLanguageDropdown()
     {
-        _languagePickerOpen = false;
-        LanguagePickerOverlay.Visibility = Visibility.Collapsed;
-        RefreshPanelHeight();
-
-        if (restoreFocus)
+        var anchorButton = GetSelectedOptionButton();
+        if (anchorButton is null)
         {
-            _optionsFocused = CanFocusCurrentOption;
-            UpdateMenuHints();
+            return;
+        }
+
+        var bottomRight = anchorButton.TranslatePoint(
+            new Point(anchorButton.ActualWidth, anchorButton.ActualHeight),
+            PanelRootGrid);
+
+        var rootWidth = PanelRootGrid.ActualWidth;
+        var rootHeight = PanelRootGrid.ActualHeight;
+        var dropdownWidth = LanguageDropdown.ActualWidth > 0 ? LanguageDropdown.ActualWidth : LanguageDropdown.Width;
+        var dropdownHeight = LanguageDropdown.ActualHeight > 0 ? LanguageDropdown.ActualHeight : 30.0;
+
+        var left = bottomRight.X - dropdownWidth;
+        left = rootWidth > 0
+            ? Math.Clamp(left, 0, Math.Max(0, rootWidth - dropdownWidth))
+            : Math.Max(0, left);
+
+        var top = bottomRight.Y + 4;
+        if (rootHeight > 0)
+        {
+            top = Math.Clamp(top, 0, Math.Max(0, rootHeight - dropdownHeight));
+        }
+
+        Canvas.SetLeft(LanguageDropdown, left);
+        Canvas.SetTop(LanguageDropdown, top);
+    }
+
+    private void CloseLanguageDropdown(bool commit)
+    {
+        if (!_languageDropdownOpen)
+        {
+            return;
+        }
+
+        _languageDropdownOpen = false;
+        var shouldCommit = commit;
+        _languageDropdownCommitted = false;
+
+        var chosen = shouldCommit ? (LanguageDropdown.SelectedItem as string)?.Trim() : null;
+
+        if (LanguageDropdown.IsDropDownOpen)
+        {
+            LanguageDropdown.IsDropDownOpen = false;
+        }
+
+        LanguageDropdownOverlay.Visibility = Visibility.Collapsed;
+
+        if (!string.IsNullOrEmpty(chosen))
+        {
+            _targetLanguage = chosen;
+            UpdateRowOptions();
+        }
+
+        _optionsFocused = false;
+        UpdateMenuHints();
+
+        if (IsActive && !_closing)
+        {
             FocusStageTarget();
         }
-    }
-
-    private void PopulateLanguages(string term)
-    {
-        var current = _targetLanguage;
-        var trimmed = term.Trim();
-        var matches = new List<string>();
-
-        foreach (var language in MenuModel.GetLanguages(_targetLanguage))
-        {
-            if (trimmed.Length == 0
-                || language.Contains(trimmed, StringComparison.OrdinalIgnoreCase))
-            {
-                matches.Add(language);
-            }
-        }
-
-        var options = new List<string>();
-        if (trimmed.Length > 0 && matches.Count == 0)
-        {
-            options.Add(trimmed);
-        }
-
-        options.AddRange(matches);
-
-        _updatingLanguageList = true;
-        LanguageListBox.Items.Clear();
-        foreach (var option in options)
-        {
-            LanguageListBox.Items.Add(option);
-        }
-
-        if (options.Count > 0)
-        {
-            var selected = options.FindIndex(l => string.Equals(l, current, StringComparison.OrdinalIgnoreCase));
-            LanguageListBox.SelectedIndex = selected >= 0 ? selected : 0;
-        }
-
-        _updatingLanguageList = false;
-    }
-
-    private void MoveLanguageSelection(int delta)
-    {
-        var count = LanguageListBox.Items.Count;
-        if (count == 0)
-        {
-            return;
-        }
-
-        var index = LanguageListBox.SelectedIndex;
-        index = index < 0 ? 0 : ((index + delta) % count + count) % count;
-        LanguageListBox.SelectedIndex = index;
-        LanguageListBox.ScrollIntoView(LanguageListBox.Items[index]);
-    }
-
-    private void ApplyLanguage(string language)
-    {
-        var trimmed = language.Trim();
-        if (trimmed.Length == 0)
-        {
-            return;
-        }
-
-        _settings.SetTargetLanguage(trimmed);
-        _targetLanguage = trimmed;
-
-        CloseLanguagePicker(restoreFocus: false);
-        UpdateRowOptions();
-        _optionsFocused = _highlighted?.Options == ActionOptionKind.Language && CanFocusCurrentOption;
-        UpdateMenuHints();
-        FocusStageTarget();
     }
 
     // ---- Actions -----------------------------------------------------------
@@ -1311,7 +1285,10 @@ public partial class PanelWindow : Window
         _activeReadOnly = _classification.ReadOnly;
         _resultText = string.Empty;
         _optionsFocused = false;
-        _languagePickerOpen = false;
+        _languageDropdownOpen = false;
+        _languageDropdownCommitted = false;
+        LanguageDropdown.IsDropDownOpen = false;
+        LanguageDropdownOverlay.Visibility = Visibility.Collapsed;
 
         var selectionText = BuildSelectionText();
         var options = BuildOptions(action, forceOptionsOff, promptText, out var optionsLog);
@@ -1680,6 +1657,10 @@ public partial class PanelWindow : Window
         }
 
         CancelActiveRequest();
+        _languageDropdownOpen = false;
+        _languageDropdownCommitted = false;
+        LanguageDropdown.IsDropDownOpen = false;
+        LanguageDropdownOverlay.Visibility = Visibility.Collapsed;
         _resultText = string.Empty;
         PreviewBox.Text = string.Empty;
         _closing = true;
@@ -1692,9 +1673,9 @@ public partial class PanelWindow : Window
 
     private void OnWindowPreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (_languagePickerOpen)
+        if (_languageDropdownOpen || LanguageDropdown.IsDropDownOpen)
         {
-            HandleLanguagePickerKey(e);
+            HandleLanguageDropdownKey(e);
             return;
         }
 
@@ -1770,7 +1751,7 @@ public partial class PanelWindow : Window
             e.Handled = true;
             if (_optionsFocused)
             {
-                ConfirmOption();
+                ActivateOption();
                 return;
             }
 
@@ -1837,7 +1818,7 @@ public partial class PanelWindow : Window
             if (HasVisibleOptions)
             {
                 e.Handled = true;
-                ToggleOrCycleOption();
+                ActivateOption();
             }
 
             return;
@@ -2045,49 +2026,29 @@ public partial class PanelWindow : Window
         }
     }
 
-    private void HandleLanguagePickerKey(KeyEventArgs e)
+    private void HandleLanguageDropdownKey(KeyEventArgs e)
     {
         if (e.Key == Key.Escape)
         {
             e.Handled = true;
-            CloseLanguagePicker(restoreFocus: true);
-            return;
-        }
-
-        if (e.Key == Key.Enter)
-        {
-            e.Handled = true;
-            var chosen = LanguageListBox.SelectedItem as string;
-            if (string.IsNullOrWhiteSpace(chosen))
-            {
-                chosen = LanguageSearchBox.Text.Trim();
-            }
-
-            if (!string.IsNullOrWhiteSpace(chosen))
-            {
-                ApplyLanguage(chosen);
-            }
-
-            return;
-        }
-
-        if (e.Key == Key.Up)
-        {
-            e.Handled = true;
-            MoveLanguageSelection(-1);
-            return;
-        }
-
-        if (e.Key == Key.Down)
-        {
-            e.Handled = true;
-            MoveLanguageSelection(1);
+            CloseLanguageDropdown(commit: false);
             return;
         }
 
         if (e.Key == Key.Tab)
         {
             e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.Enter)
+        {
+            _languageDropdownCommitted = true;
+            if (!LanguageDropdown.IsDropDownOpen)
+            {
+                e.Handled = true;
+                CloseLanguageDropdown(commit: true);
+            }
         }
     }
 
@@ -2198,7 +2159,7 @@ public partial class PanelWindow : Window
     {
         if (_stage == PanelStage.ChooseAction)
         {
-            OpenLanguagePicker();
+            OpenLanguageDropdown();
         }
     }
 
@@ -2225,39 +2186,27 @@ public partial class PanelWindow : Window
 
     private void OnPromptRunClick(object sender, RoutedEventArgs e) => RunPrompt();
 
-    private void OnLanguageSearchTextChanged(object sender, TextChangedEventArgs e)
+    private void OnLanguageDropdownClosed(object? sender, EventArgs e)
     {
-        if (_updatingLanguageList)
+        if (!_languageDropdownOpen)
         {
             return;
         }
 
-        PopulateLanguages(LanguageSearchBox.Text);
+        CloseLanguageDropdown(commit: _languageDropdownCommitted);
     }
 
-    private void OnLanguageListDoubleClick(object sender, MouseButtonEventArgs e) =>
-        CommitLanguageListClick(e);
-
-    private void OnLanguageListMouseUp(object sender, MouseButtonEventArgs e) =>
-        CommitLanguageListClick(e);
-
-    private void CommitLanguageListClick(MouseButtonEventArgs e)
+    private void OnLanguageDropdownPreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        if (!_languagePickerOpen)
+        if (!_languageDropdownOpen)
         {
             return;
         }
 
-        if (e.OriginalSource is not DependencyObject source)
+        if (e.OriginalSource is DependencyObject source
+            && ItemsControl.ContainerFromElement(LanguageDropdown, source) is ComboBoxItem)
         {
-            return;
-        }
-
-        var container = ItemsControl.ContainerFromElement(LanguageListBox, source) as ListBoxItem;
-
-        if (container?.Content is string language)
-        {
-            ApplyLanguage(language);
+            _languageDropdownCommitted = true;
         }
     }
 
@@ -2265,7 +2214,7 @@ public partial class PanelWindow : Window
 
     private void OnWindowDeactivated(object? sender, EventArgs e)
     {
-        if (_closing || _applying)
+        if (_closing || _applying || _languageDropdownOpen || LanguageDropdown.IsDropDownOpen)
         {
             return;
         }

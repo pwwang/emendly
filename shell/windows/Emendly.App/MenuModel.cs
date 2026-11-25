@@ -138,7 +138,7 @@ public static class MenuModel
         [Custom.Id] = Custom,
     };
 
-    public static readonly IReadOnlyList<string> DefaultLanguages = new[]
+    public static readonly IReadOnlyList<string> DefaultLanguages = Array.AsReadOnly(new[]
     {
         "German",
         "English",
@@ -167,7 +167,7 @@ public static class MenuModel
         "Thai",
         "Indonesian",
         "Ukrainian",
-    };
+    });
 
     private static readonly Dictionary<string, string> LanguageCodes = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -303,17 +303,22 @@ public static class MenuModel
         return list;
     }
 
-    public static string GetNextLanguage(string currentLanguage)
+    public static int FindLanguageIndex(IReadOnlyList<string> languages, string? current)
     {
-        var languages = GetLanguages(currentLanguage);
+        if (string.IsNullOrWhiteSpace(current))
+        {
+            return 0;
+        }
+
+        var trimmed = current.Trim();
         for (var i = 0; i < languages.Count; i++)
         {
-            if (string.Equals(languages[i], currentLanguage, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(languages[i], trimmed, StringComparison.OrdinalIgnoreCase))
             {
-                return languages[(i + 1) % languages.Count];
+                return i;
             }
         }
 
-        return languages[0];
+        return 0;
     }
 }

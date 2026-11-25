@@ -21,7 +21,12 @@
         FontFamily="Segoe UI"
         FontSize="13">
   <Window.Resources>
-    <Geometry x:Key="ContextIconGeometry">M 3.5,3 L 1.5,3 L 1.5,13 L 3.5,13 M 12.5,3 L 14.5,3 L 14.5,13 L 12.5,13 M 11,4 L 7,4 A 2,2 0 0 0 7,8 L 8,8 M 8,4 L 8,12.5 M 10,4 L 10,12.5</Geometry>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="Themes/LanguageDropdown.xaml" />
+      </ResourceDictionary.MergedDictionaries>
+
+      <Geometry x:Key="ContextIconGeometry">M 3.5,3 L 1.5,3 L 1.5,13 L 3.5,13 M 12.5,3 L 14.5,3 L 14.5,13 L 12.5,13 M 11,4 L 7,4 A 2,2 0 0 0 7,8 L 8,8 M 8,4 L 8,12.5 M 10,4 L 10,12.5</Geometry>
     <Geometry x:Key="ContextSlashGeometry">M 2,14 L 14,2</Geometry>
     <Geometry x:Key="GlobeIconGeometry">M 4.5,1 A 3.5,3.5 0 1 0 4.5,8 A 3.5,3.5 0 1 0 4.5,1 M 1,4.5 L 8,4.5 M 4.5,1 A 1.75,3.5 0 0 0 4.5,8 A 1.75,3.5 0 0 0 4.5,1</Geometry>
     <Geometry x:Key="LockIconGeometry">M 3.5,5 L 3.5,3.5 A 2,2 0 0 1 7.5,3.5 L 7.5,5 M 2,5 L 9,5 L 9,10 L 2,10 Z</Geometry>
@@ -194,6 +199,7 @@
         </Setter.Value>
       </Setter>
     </Style>
+    </ResourceDictionary>
   </Window.Resources>
   <Border Background="#1E1E24"
           BorderBrush="#383846"
@@ -205,7 +211,7 @@
       <DropShadowEffect BlurRadius="14" ShadowDepth="4" Opacity="0.45" Color="#000000" />
     </Border.Effect>
 
-    <Grid>
+    <Grid x:Name="PanelRootGrid">
       <Grid.RowDefinitions>
         <RowDefinition Height="Auto" />
         <RowDefinition Height="Auto" />
@@ -632,54 +638,21 @@
             </StackPanel>
           </Grid>
         </Grid>
-
-        <!-- In-window searchable language picker overlay -->
-        <Border x:Name="LanguagePickerOverlay"
-                Background="#1A1B22"
-                BorderBrush="#60A5FA"
-                BorderThickness="1"
-                CornerRadius="8"
-                Padding="10"
-                Visibility="Collapsed">
-          <Grid>
-            <Grid.RowDefinitions>
-              <RowDefinition Height="Auto" />
-              <RowDefinition Height="Auto" />
-              <RowDefinition Height="*" />
-              <RowDefinition Height="Auto" />
-            </Grid.RowDefinitions>
-            <TextBlock Grid.Row="0"
-                       Text="Target language"
-                       Foreground="#F3F4F6"
-                       FontWeight="SemiBold"
-                       FontSize="12.5"
-                       Margin="0,0,0,6" />
-            <TextBox x:Name="LanguageSearchBox"
-                     Grid.Row="1"
-                     Background="#121217"
-                     Foreground="#F3F4F6"
-                     CaretBrush="#F3F4F6"
-                     BorderBrush="#3B3B48"
-                     BorderThickness="1"
-                     Padding="7,5"
-                     Margin="0,0,0,6"
-                     TextChanged="OnLanguageSearchTextChanged" />
-            <ListBox x:Name="LanguageListBox"
-                     Grid.Row="2"
-                     Background="#121217"
-                     Foreground="#E5E7EB"
-                     BorderBrush="#2C2C36"
-                     BorderThickness="1"
-                     MouseDoubleClick="OnLanguageListDoubleClick"
-                     PreviewMouseLeftButtonUp="OnLanguageListMouseUp" />
-            <TextBlock Grid.Row="3"
-                       Text="Up/Down select · Enter confirms · Esc cancels"
-                       Foreground="#6B7280"
-                       FontSize="11"
-                       Margin="0,6,0,0" />
-          </Grid>
-        </Border>
       </Grid>
+
+      <!-- Anchored language dropdown overlay -->
+      <Canvas x:Name="LanguageDropdownOverlay"
+              Grid.RowSpan="3"
+              Panel.ZIndex="100"
+              Visibility="Collapsed">
+        <ComboBox x:Name="LanguageDropdown"
+                  Width="220"
+                  IsEditable="False"
+                  IsTextSearchEnabled="True"
+                  Style="{StaticResource LanguageDropdownStyle}"
+                  DropDownClosed="OnLanguageDropdownClosed"
+                  PreviewMouseLeftButtonUp="OnLanguageDropdownPreviewMouseLeftButtonUp" />
+      </Canvas>
     </Grid>
   </Border>
 </Window>

@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
@@ -43,7 +42,7 @@ public partial class SettingsWindow : Window
 
         var languages = MenuModel.GetLanguages(_originalLanguage);
         DefaultLanguageCombo.ItemsSource = languages;
-        DefaultLanguageCombo.SelectedIndex = FindLanguageIndex(languages, _originalLanguage);
+        DefaultLanguageCombo.SelectedIndex = MenuModel.FindLanguageIndex(languages, _originalLanguage);
 
         BaseUrlBox.Text = current.BaseUrl;
         ModelBox.Text = current.Model;
@@ -282,19 +281,6 @@ public partial class SettingsWindow : Window
     {
         ValidationText.Text = message;
         ValidationText.Visibility = Visibility.Visible;
-    }
-
-    private static int FindLanguageIndex(IReadOnlyList<string> languages, string current)
-    {
-        for (var i = 0; i < languages.Count; i++)
-        {
-            if (string.Equals(languages[i], current, StringComparison.OrdinalIgnoreCase))
-            {
-                return i;
-            }
-        }
-
-        return 0;
     }
 
     private static bool IsModifierKey(Key key) =>
