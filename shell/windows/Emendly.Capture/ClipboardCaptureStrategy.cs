@@ -3,11 +3,19 @@ namespace Emendly.Capture;
 public sealed class ClipboardCaptureStrategy : ICaptureStrategy
 {
     public const string StrategyId = "clipboard";
+    public const string ReadOnlyStrategyId = "clipboard-ro";
+
+    private readonly bool _forceReadOnly;
+
+    public ClipboardCaptureStrategy(bool forceReadOnly = false)
+    {
+        _forceReadOnly = forceReadOnly;
+    }
     private const int CopyPollIntervalMs = 15;
     private const int CopyWaitTimeoutMs = 150;
     private static readonly string[] ClipboardPatterns = { "Clipboard" };
 
-    public string Name => StrategyId;
+    public string Name => _forceReadOnly ? ReadOnlyStrategyId : StrategyId;
 
     public CaptureResult TryCapture(IntPtr topHwnd) =>
         TryCapture(topHwnd, CaptureOptions.Full);
@@ -49,8 +57,10 @@ public sealed class ClipboardCaptureStrategy : ICaptureStrategy
             ClipboardHelper.RestoreSnapshot(snapshot);
         }
 
-        var classification = SelectionClassifier.Classify(selectedText, readOnly: false);
-        var verdict = selectedText.Length > 0 ? "selection" : "caret";
+        var classification = SelectionClassifier.Classify(selectedText, readOnly: _forceReadOnly);
+        var verdict = _forceReadOnly
+            ? "read_only"
+            : (selectedText.Length > 0 ? "selection" : "caret");
         var caretLocation = options.IncludeContext
             ? CaretLocator.Locate(null, topHwnd)
             : CaretLocator.GetMouseFallback();
@@ -68,20 +78,20 @@ public sealed class ClipboardCaptureStrategy : ICaptureStrategy
                 IsKeyboardFocusable: true),
             Patterns: ClipboardPatterns,
             Enabled: true,
-            ReadOnly: false,
+            ReadOnly: _forceReadOnly,
             Selection: new SelectionInfo(selectedText.Length, UiaProbe.SanitizePreview(selectedText)),
             Caret: new CaretInfo(Supported: false, Offset: null),
             FieldTextLength: selectedText.Length,
             Verdict: verdict,
-            Strategy: StrategyId);
+            Strategy: Name);
 
         return new CaptureResult(
             Handled: true,
             State: classification.State,
             Text: selectedText,
             SelectionLength: selectedText.Length,
-            ReadOnly: false,
-            StrategyName: StrategyId,
+            ReadOnly: _forceReadOnly,
+            StrategyName: Name,
             CaretLocation: caretLocation,
             FieldContext: options.IncludeContext ? selectedText : string.Empty,
             SurroundingContext: null,

@@ -196,9 +196,10 @@ public partial class App : Application
                     if (readOnlyClassification.State == SelectionState.Empty)
                     {
                         var reason = snapshot.Report.Enabled
-                            ? "Focused text field is read-only."
-                            : "Focused text field is disabled.";
-                        OpenPanel(foreground, readOnlyClassification, snapshot, unsupportedReason: reason);
+                            ? "Select text first. This window is read-only, so results are copied, not inserted."
+                            : "This window is disabled.";
+                        ShowNotice(foreground.ProcessName, reason, CaretLocator.GetMouseFallback());
+                        return;
                     }
                     else
                     {
