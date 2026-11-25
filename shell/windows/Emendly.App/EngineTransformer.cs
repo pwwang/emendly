@@ -11,7 +11,7 @@ namespace Emendly.App;
 
 public sealed class EngineTransformer : ITransformer
 {
-    private const int SupportedProtocolVersion = 1;
+    public const int SupportedProtocolVersion = 1;
     private const int HandshakeTimeoutMs = 5000;
     private const int CancelGraceMs = 600;
 
@@ -22,6 +22,7 @@ public sealed class EngineTransformer : ITransformer
 
     private string _baseUrl;
     private string _model;
+    private volatile string? _engineVersion;
     private string? _defaultTargetLanguage;
     private string? _spawnedApiKey;
     private long _nextRequestId;
@@ -44,6 +45,8 @@ public sealed class EngineTransformer : ITransformer
 
     public string StatusSummary => $"Engine ({Path.GetFileName(_enginePath)})";
 
+    public string? EngineVersion => _engineVersion;
+
     public string? DefaultTargetLanguage => _defaultTargetLanguage;
 
     public async Task ConfigureAsync(string baseUrl, string model, CancellationToken cancellationToken = default)
@@ -51,18 +54,9 @@ public sealed class EngineTransformer : ITransformer
         _baseUrl = baseUrl;
         _model = model;
 
-        await _lifecycleLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            if (_process is not null && !_process.HasExited)
-            {
-                await ApplyConfigLockedAsync(cancellationToken).ConfigureAwait(false);
-            }
-        }
-        finally
-        {
-            _lifecycleLock.Release();
-        }
+        // Start (or reuse) the engine, then push the endpoint and model into it.
+        // Without the start, a warm-up call from startup would configure nothing.
+        await EnsureStartedAsync(AppSettings.ReadApiKey(), cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<TransformResult> TransformAsync(
@@ -190,7 +184,7 @@ public sealed class EngineTransformer : ITransformer
             var json = BuildSimpleRequestJson(id, "health");
             await WriteLineAsync(json, timeoutCts.Token).ConfigureAwait(false);
 
-            var protocol = await pending.ProtocolTcs!.Task.WaitAsync(timeoutCts.Token).ConfigureAwait(false);
+            var (protocol, version) = await pending.HealthTcs!.Task.WaitAsync(timeoutCts.Token).ConfigureAwait(false);
             if (protocol != SupportedProtocolVersion)
             {
                 await StopProcessLockedAsync().ConfigureAwait(false);
@@ -199,6 +193,9 @@ public sealed class EngineTransformer : ITransformer
                     $"Unsupported engine protocol version {protocol} (expected {SupportedProtocolVersion}).",
                     retryable: false);
             }
+
+            _engineVersion = version;
+            VersionInfo.EngineVersion = version;
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -309,7 +306,17 @@ public sealed class EngineTransformer : ITransformer
                     var protocol = root.TryGetProperty("protocol", out var protoEl) && protoEl.TryGetInt32(out var p)
                         ? p
                         : -1;
-                    pending.ProtocolTcs?.TrySetResult(protocol);
+                    string? version = null;
+                    if (root.TryGetProperty("version", out var versionEl) && versionEl.ValueKind == JsonValueKind.String)
+                    {
+                        var rawVersion = versionEl.GetString()?.Trim();
+                        if (!string.IsNullOrEmpty(rawVersion))
+                        {
+                            version = rawVersion;
+                        }
+                    }
+
+                    pending.HealthTcs?.TrySetResult((protocol, version));
                     break;
 
                 case "config":
@@ -644,18 +651,18 @@ public sealed class EngineTransformer : ITransformer
         public Action<string>? OnDelta { get; }
         public StringBuilder Accumulated { get; } = new();
         public TaskCompletionSource<TransformResult>? ResultTcs { get; }
-        public TaskCompletionSource<int>? ProtocolTcs { get; }
+        public TaskCompletionSource<(int Protocol, string? Version)>? HealthTcs { get; }
         public TaskCompletionSource<bool>? ConfigTcs { get; }
 
         private PendingCall(
             Action<string>? onDelta,
             TaskCompletionSource<TransformResult>? resultTcs,
-            TaskCompletionSource<int>? protocolTcs,
+            TaskCompletionSource<(int Protocol, string? Version)>? healthTcs,
             TaskCompletionSource<bool>? configTcs)
         {
             OnDelta = onDelta;
             ResultTcs = resultTcs;
-            ProtocolTcs = protocolTcs;
+            HealthTcs = healthTcs;
             ConfigTcs = configTcs;
         }
 
@@ -671,7 +678,7 @@ public sealed class EngineTransformer : ITransformer
         public void TrySetException(Exception ex)
         {
             ResultTcs?.TrySetException(ex);
-            ProtocolTcs?.TrySetException(ex);
+            HealthTcs?.TrySetException(ex);
             ConfigTcs?.TrySetException(ex);
         }
     }

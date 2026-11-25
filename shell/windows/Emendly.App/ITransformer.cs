@@ -36,6 +36,7 @@ public interface ITransformer : IAsyncDisposable
     string ModeName { get; }
     bool IsEchoFallback { get; }
     string StatusSummary { get; }
+    string? EngineVersion { get; }
     string? DefaultTargetLanguage { get; }
 
     Task ConfigureAsync(string baseUrl, string model, CancellationToken cancellationToken = default);

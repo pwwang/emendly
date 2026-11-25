@@ -16,6 +16,8 @@ public sealed class EchoTransformer : ITransformer
 
     public string StatusSummary => "Echo mode (engine binary not found)";
 
+    public string? EngineVersion => null;
+
     public string? DefaultTargetLanguage => null;
 
     public Task ConfigureAsync(string baseUrl, string model, CancellationToken cancellationToken = default) =>

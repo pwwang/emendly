@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Emendly Settings"
         Icon="/Assets/emendly.ico"
-        Width="420"
+        Width="440"
         SizeToContent="Height"
         ResizeMode="NoResize"
         WindowStartupLocation="CenterScreen"
@@ -245,6 +245,13 @@
                FontSize="12"
                TextWrapping="Wrap"
                Visibility="Collapsed"
+               Margin="0,0,0,10" />
+
+    <TextBlock x:Name="VersionFooterText"
+               Foreground="#6B7280"
+               FontSize="11"
+               TextWrapping="NoWrap"
+               TextTrimming="CharacterEllipsis"
                Margin="0,0,0,10" />
 
     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">

@@ -273,8 +273,26 @@ public sealed class AppSettings
         }
 
         var baseDir = AppContext.BaseDirectory;
+        var bundledSubdir = ResolveBinaryCandidate(Path.Combine(baseDir, "engine", "emendly-engine"));
+        if (bundledSubdir is not null)
+        {
+            return bundledSubdir;
+        }
+
+        var bundledBeside = ResolveBinaryCandidate(Path.Combine(baseDir, "emendly-engine"));
+        if (bundledBeside is not null)
+        {
+            return bundledBeside;
+        }
+
+        return ResolveRepoEngine(baseDir, "debug")
+            ?? ResolveRepoEngine(baseDir, "release");
+    }
+
+    private static string? ResolveRepoEngine(string baseDir, string profile)
+    {
         var relativeDefault = Path.GetFullPath(
-            Path.Combine(baseDir, "..", "..", "engine", "target", "debug", "emendly-engine"));
+            Path.Combine(baseDir, "..", "..", "engine", "target", profile, "emendly-engine"));
         var direct = ResolveBinaryCandidate(relativeDefault);
         if (direct is not null)
         {
@@ -282,17 +300,16 @@ public sealed class AppSettings
         }
 
         // Also walk ancestors so `dotnet run` from bin/Debug/net9.0-windows finds repo engine/.
-        var fromAncestors = SearchAncestorsForEngine(baseDir, maxDepth: 6)
-            ?? SearchAncestorsForEngine(Environment.CurrentDirectory, maxDepth: 4);
-        return fromAncestors;
+        return SearchAncestorsForEngine(baseDir, profile, maxDepth: 6)
+            ?? SearchAncestorsForEngine(Environment.CurrentDirectory, profile, maxDepth: 4);
     }
 
-    private static string? SearchAncestorsForEngine(string startDir, int maxDepth)
+    private static string? SearchAncestorsForEngine(string startDir, string profile, int maxDepth)
     {
         var dir = new DirectoryInfo(startDir);
         for (var i = 0; i <= maxDepth && dir is not null; i++)
         {
-            var candidate = Path.Combine(dir.FullName, "engine", "target", "debug", "emendly-engine");
+            var candidate = Path.Combine(dir.FullName, "engine", "target", profile, "emendly-engine");
             var resolved = ResolveBinaryCandidate(candidate);
             if (resolved is not null)
             {

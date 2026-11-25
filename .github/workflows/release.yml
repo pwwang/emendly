@@ -1,0 +1,189 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  engine:
+    name: Engine (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            bin_name: emendly-engine.exe
+            artifact_name: engine-win-x64
+          - os: ubuntu-latest
+            bin_name: emendly-engine
+            artifact_name: engine-linux-x64
+          - os: macos-latest
+            bin_name: emendly-engine
+            artifact_name: engine-macos
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            engine/target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('engine/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build engine (release)
+        run: cargo build --manifest-path engine/Cargo.toml --release --locked
+
+      - name: Stage engine binary
+        shell: bash
+        run: |
+          mkdir -p dist-engine
+          cp "engine/target/release/${{ matrix.bin_name }}" "dist-engine/${{ matrix.bin_name }}"
+
+      - name: Upload engine artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: dist-engine/${{ matrix.bin_name }}
+          if-no-files-found: error
+
+  shell:
+    name: Windows Shell
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Strip leading v from tag
+        id: version
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}" -replace '^v', ''
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "value=$version"
+
+      - name: Publish Windows shell
+        shell: pwsh
+        run: |
+          dotnet publish shell/windows/Emendly.App/Emendly.App.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=false `
+            -p:Version=${{ steps.version.outputs.value }} `
+            -o publish-shell
+
+      - name: Upload shell artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: shell-win-x64
+          path: publish-shell/
+          if-no-files-found: error
+
+  package:
+    name: Package Windows Release
+    needs:
+      - engine
+      - shell
+    runs-on: windows-latest
+    steps:
+      - name: Download Windows shell
+        uses: actions/download-artifact@v4
+        with:
+          name: shell-win-x64
+          path: stage/Emendly
+
+      - name: Download Windows engine
+        uses: actions/download-artifact@v4
+        with:
+          name: engine-win-x64
+          path: stage/Emendly/engine
+
+      - name: Verify bundle layout and create zip
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $required = @(
+            "stage/Emendly/Emendly.App.exe",
+            "stage/Emendly/engine/emendly-engine.exe",
+            "stage/Emendly/Assets/emendly.ico",
+            "stage/Emendly/appsettings.json",
+            "stage/Emendly/app-rules.json"
+          )
+          foreach ($file in $required) {
+            if (-not (Test-Path $file)) {
+              throw "Missing required bundle file: $file"
+            }
+          }
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Compress-Archive -Path "stage/Emendly" -DestinationPath "dist/Emendly-$tag-win-x64.zip" -Force
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup -y --no-progress
+
+      - name: Build Inno Setup installer
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $version = $tag -replace '^v', ''
+          $iss = @"
+          [Setup]
+          AppId={{8D6B4A7E-5F2C-4C19-9A3B-2E7F4B1C9D08}
+          AppName=Emendly
+          AppVersion=$version
+          DefaultDirName={localappdata}\Programs\Emendly
+          DefaultGroupName=Emendly
+          DisableProgramGroupPage=yes
+          PrivilegesRequired=lowest
+          OutputDir=dist
+          OutputBaseFilename=Emendly-$tag-win-x64-setup
+          SetupIconFile=stage\Emendly\Assets\emendly.ico
+          UninstallDisplayIcon={app}\Emendly.App.exe
+          Compression=lzma2
+          SolidCompression=yes
+          WizardStyle=modern
+          CloseApplications=yes
+
+          [Files]
+          Source: "stage\Emendly\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+          [Icons]
+          Name: "{userprograms}\Emendly"; Filename: "{app}\Emendly.App.exe"
+
+          [Run]
+          Filename: "{app}\Emendly.App.exe"; Description: "{cm:LaunchProgram,Emendly}"; Flags: nowait postinstall skipifsilent
+          "@
+          Set-Content -Path "installer.iss" -Value $iss -Encoding UTF8
+
+          $isccCmd = Get-Command iscc -ErrorAction SilentlyContinue
+          $iscc = if ($isccCmd) { $isccCmd.Source } else { Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe" }
+          if (-not (Test-Path $iscc)) {
+            throw "ISCC.exe not found after installing Inno Setup"
+          }
+          & $iscc installer.iss
+          if ($LASTEXITCODE -ne 0) {
+            throw "ISCC failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/Emendly-${{ github.ref_name }}-win-x64.zip
+            dist/Emendly-${{ github.ref_name }}-win-x64-setup.exe

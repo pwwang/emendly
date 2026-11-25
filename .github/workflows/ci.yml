@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  engine:
+    name: Engine (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            bin_name: emendly-engine
+            artifact_name: emendly-engine-linux-x64
+          - os: windows-latest
+            bin_name: emendly-engine.exe
+            artifact_name: emendly-engine-win-x64
+          - os: macos-latest
+            bin_name: emendly-engine
+            artifact_name: emendly-engine-macos
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            engine/target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('engine/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Test engine
+        run: cargo test --manifest-path engine/Cargo.toml --locked
+
+      - name: Build engine (release)
+        run: cargo build --manifest-path engine/Cargo.toml --release --locked
+
+      - name: Upload engine binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: engine/target/release/${{ matrix.bin_name }}
+          if-no-files-found: error
+
+  shell:
+    name: Windows Shell
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Build Windows shell
+        run: dotnet build shell/windows/Emendly.sln -c Release

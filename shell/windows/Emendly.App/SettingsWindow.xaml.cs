@@ -17,6 +17,7 @@ public partial class SettingsWindow : Window
     private readonly Rect? _panelBounds;
     private readonly string _originalHotkey;
     private readonly string _originalLanguage;
+    private Action? _engineVersionRefresh;
 
     private string _pendingHotkey;
     private bool _capturingHotkey;
@@ -31,7 +32,8 @@ public partial class SettingsWindow : Window
         HotkeyWindow? hotkeyWindow = null,
         CaretLocation? caretAnchor = null,
         bool topmost = false,
-        Rect? panelBounds = null)
+        Rect? panelBounds = null,
+        string? engineVersion = null)
     {
         InitializeComponent();
 
@@ -63,6 +65,22 @@ public partial class SettingsWindow : Window
         ApiKeyStatusText.Text = hasKey
             ? "EMENDLY_API_KEY: detected in environment (never stored on disk)"
             : "EMENDLY_API_KEY: not set (set as an environment variable)";
+        VersionFooterText.Text = VersionInfo.FormatFooter(engineVersion ?? VersionInfo.EngineVersion);
+
+        // The engine handshake can land after the window opens; keep the footer current.
+        _engineVersionRefresh = () =>
+        {
+            if (Dispatcher.CheckAccess())
+            {
+                RefreshVersionFooter();
+            }
+            else
+            {
+                Dispatcher.InvokeAsync(RefreshVersionFooter);
+            }
+        };
+        VersionInfo.RefreshRequested += _engineVersionRefresh;
+        Loaded += (_, _) => RefreshVersionFooter();
 
         if (panelBounds.HasValue)
         {
@@ -74,6 +92,22 @@ public partial class SettingsWindow : Window
             WindowStartupLocation = WindowStartupLocation.Manual;
             CenterOnCaretScreen(caretAnchor.Value, 400);
         }
+    }
+
+    private void RefreshVersionFooter()
+    {
+        VersionFooterText.Text = VersionInfo.FormatFooter();
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        if (_engineVersionRefresh is not null)
+        {
+            VersionInfo.RefreshRequested -= _engineVersionRefresh;
+            _engineVersionRefresh = null;
+        }
+
+        base.OnClosed(e);
     }
 
     [System.Runtime.InteropServices.DllImport("dwmapi.dll", PreserveSig = true)]
@@ -157,7 +191,7 @@ public partial class SettingsWindow : Window
         double top;
 
         // Right first, then left, then below. The panel is 380 wide, so a monitor that fits
-        // the 420 px settings window beside it will almost always take one of the two sides.
+        // the 440 px settings window beside it will almost always take one of the two sides.
         if (panel.Right + BesideGap + width <= workRight - ScreenMargin)
         {
             left = panel.Right + BesideGap;

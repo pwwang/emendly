@@ -54,6 +54,10 @@ public partial class App : Application
         _captureRules = AppCaptureRules.LoadDefault();
         _transformer = CreateTransformer(_settings);
 
+        // Probe the engine once at startup on every path: this warms the sidecar and
+        // makes its version known to the settings footer before any action runs.
+        _ = ConfigureTransformerSafeAsync(_settings.BaseUrl, _settings.Model);
+
         if (openSettingsAndExit)
         {
             _shutdownAfterSettings = true;
@@ -101,6 +105,11 @@ public partial class App : Application
         var menu = new Forms.ContextMenuStrip();
         menu.Opening += (_, _) => UpdateUndoMenuItem();
 
+        var versionItem = new Forms.ToolStripMenuItem($"Emendly {VersionInfo.AppVersion}")
+        {
+            Enabled = false,
+        };
+
         var settingsItem = new Forms.ToolStripMenuItem("Settings");
         settingsItem.Click += (_, _) => OpenSettings();
 
@@ -113,6 +122,8 @@ public partial class App : Application
         var quitItem = new Forms.ToolStripMenuItem("Quit");
         quitItem.Click += (_, _) => Shutdown(0);
 
+        menu.Items.Add(versionItem);
+        menu.Items.Add(new Forms.ToolStripSeparator());
         menu.Items.Add(settingsItem);
         menu.Items.Add(_undoMenuItem);
         menu.Items.Add(new Forms.ToolStripSeparator());
@@ -379,7 +390,8 @@ public partial class App : Application
             _hotkeyWindow,
             caretAnchor,
             topmost,
-            panelBounds);
+            panelBounds,
+            _transformer?.EngineVersion);
         _settingsWindow = dialog;
 
         dialog.Saved += (_, _) => OnSettingsSaved();
