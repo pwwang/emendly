@@ -25,7 +25,15 @@ public partial class PanelWindow : Window
         ErrorOrCancelled,
     }
 
+    private sealed record ActionRowElements(
+        Border Row,
+        Button? ChipButton,
+        MenuAction Action);
+
     private const int MaxSelectionCharacters = 4000;
+    private const double NarrowMenuWidth = 380;
+    private const double WideMenuWidth = 500;
+    private const double DefaultPanelWidth = 440;
 
     private static readonly Brush RowNormalBg = Brushes.Transparent;
     private static readonly Brush RowSelectedBg = new SolidColorBrush(Color.FromRgb(0x2A, 0x33, 0x47));
@@ -45,7 +53,7 @@ public partial class PanelWindow : Window
     private readonly ITransformer _transformer;
     private readonly ClipboardInserter _inserter;
     private readonly List<MenuAction> _visibleActions = new();
-    private readonly List<Border> _actionRows = new();
+    private readonly List<ActionRowElements> _actionRows = new();
 
     private PanelStage _stage = PanelStage.ChooseAction;
     private bool _expanded;
@@ -186,18 +194,14 @@ public partial class PanelWindow : Window
                 break;
 
             case PanelStage.ChooseAction:
-                if (_optionsFocused && ContextChipButton.Visibility == Visibility.Visible && ContextChipButton.IsEnabled)
+                if (_optionsFocused && GetSelectedChipButton() is { IsEnabled: true } chip)
                 {
-                    ContextChipButton.Focus();
-                    Keyboard.Focus(ContextChipButton);
-                }
-                else if (_optionsFocused && LanguageChipButton.Visibility == Visibility.Visible)
-                {
-                    LanguageChipButton.Focus();
-                    Keyboard.Focus(LanguageChipButton);
+                    chip.Focus();
+                    Keyboard.Focus(chip);
                 }
                 else
                 {
+                    _optionsFocused = false;
                     ActionListPanel.Focus();
                     Keyboard.Focus(ActionListPanel);
                 }
@@ -285,7 +289,7 @@ public partial class PanelWindow : Window
         switch (stage)
         {
             case PanelStage.ChooseAction:
-                UpdateOptionsRow();
+                UpdateRowOptions();
                 UpdateMenuHints();
                 break;
 
@@ -307,6 +311,7 @@ public partial class PanelWindow : Window
                 break;
         }
 
+        UpdatePanelWidth();
         UpdateModeLine();
 
         _ = Dispatcher.InvokeAsync(() =>
@@ -427,20 +432,50 @@ public partial class PanelWindow : Window
             Foreground = LabelText,
             FontWeight = FontWeights.Medium,
             FontSize = 13,
+            TextTrimming = TextTrimming.CharacterEllipsis,
         });
         labelStack.Children.Add(new TextBlock
         {
             Text = action.Description,
             Foreground = DescText,
             FontSize = 11,
+            TextTrimming = TextTrimming.CharacterEllipsis,
         });
 
-        var grid = new Grid();
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        grid.Children.Add(numberBadge);
+        var itemGrid = new Grid();
+        itemGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        itemGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        itemGrid.Children.Add(numberBadge);
         Grid.SetColumn(labelStack, 1);
-        grid.Children.Add(labelStack);
+        itemGrid.Children.Add(labelStack);
+
+        var rowGrid = new Grid();
+        rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        rowGrid.Children.Add(itemGrid);
+
+        Button? chipButton = null;
+        if (action.Options != ActionOptionKind.None)
+        {
+            chipButton = new Button
+            {
+                Style = (Style)FindResource("OptionChipButtonStyle"),
+                Margin = new Thickness(12, 0, 0, 0),
+                Visibility = Visibility.Collapsed,
+            };
+
+            if (action.Options == ActionOptionKind.Context)
+            {
+                chipButton.Click += OnContextChipClick;
+            }
+            else if (action.Options == ActionOptionKind.Language)
+            {
+                chipButton.Click += OnLanguageChipClick;
+            }
+
+            Grid.SetColumn(chipButton, 1);
+            rowGrid.Children.Add(chipButton);
+        }
 
         var row = new Border
         {
@@ -451,18 +486,29 @@ public partial class PanelWindow : Window
             Padding = new Thickness(8, 6, 8, 6),
             Margin = new Thickness(0, 1, 0, 1),
             Cursor = Cursors.Hand,
-            Child = grid,
+            Child = rowGrid,
         };
 
-        row.MouseEnter += (_, _) => SelectIndex(index);
-        row.MouseLeftButtonUp += (_, _) =>
+        row.MouseEnter += (_, _) =>
         {
+            if (_selectedIndex != index)
+            {
+                SelectIndex(index);
+            }
+        };
+        row.MouseLeftButtonUp += (_, e) =>
+        {
+            if (IsDescendantOf(e.OriginalSource as DependencyObject, chipButton))
+            {
+                return;
+            }
+
             SelectIndex(index);
             TriggerAction(action, forceOptionsOff: false);
         };
 
         _visibleActions.Add(action);
-        _actionRows.Add(row);
+        _actionRows.Add(new ActionRowElements(row, chipButton, action));
         ActionListPanel.Children.Add(row);
     }
 
@@ -495,9 +541,15 @@ public partial class PanelWindow : Window
             return;
         }
 
+        var wasOptionsFocused = _optionsFocused;
         _selectedIndex = ((index % _visibleActions.Count) + _visibleActions.Count) % _visibleActions.Count;
         _optionsFocused = false;
         UpdateSelectionVisuals();
+
+        if (wasOptionsFocused)
+        {
+            FocusStageTarget();
+        }
     }
 
     private void MoveSelection(int delta) => SelectIndex(_selectedIndex + delta);
@@ -507,16 +559,36 @@ public partial class PanelWindow : Window
             ? _visibleActions[_selectedIndex]
             : null;
 
+    private ActionRowElements? GetSelectedRow() =>
+        _selectedIndex >= 0 && _selectedIndex < _actionRows.Count
+            ? _actionRows[_selectedIndex]
+            : null;
+
+    private Button? GetSelectedChipButton()
+    {
+        var row = GetSelectedRow();
+        return row?.ChipButton is { Visibility: Visibility.Visible } chip ? chip : null;
+    }
+
+    private bool CanFocusCurrentChip =>
+        GetSelectedChipButton() is { IsEnabled: true };
+
     private void UpdateSelectionVisuals()
     {
         for (var i = 0; i < _actionRows.Count; i++)
         {
             var isSelected = i == _selectedIndex;
-            _actionRows[i].Background = isSelected ? RowSelectedBg : RowNormalBg;
-            _actionRows[i].BorderBrush = isSelected ? RowSelectedBorder : Brushes.Transparent;
+            var entry = _actionRows[i];
+            entry.Row.Background = isSelected ? RowSelectedBg : RowNormalBg;
+            entry.Row.BorderBrush = isSelected ? RowSelectedBorder : Brushes.Transparent;
         }
 
-        UpdateOptionsRow();
+        if (_selectedIndex >= 0 && _selectedIndex < _actionRows.Count && IsLoaded)
+        {
+            _actionRows[_selectedIndex].Row.BringIntoView();
+        }
+
+        UpdateRowOptions();
         UpdateMenuHints();
         UpdateModeLine();
     }
@@ -535,76 +607,117 @@ public partial class PanelWindow : Window
         FocusStageTarget();
     }
 
-    // ---- Options row -------------------------------------------------------
+    // ---- Row options -------------------------------------------------------
 
     private bool HasVisibleOptions =>
         _highlighted is { Options: not ActionOptionKind.None };
 
-    private void UpdateOptionsRow()
+    private void UpdateRowOptions()
     {
         _highlighted = _stage == PanelStage.ChooseAction ? GetSelectedAction() : null;
 
-        if (_stage != PanelStage.ChooseAction || _highlighted is null)
+        for (var i = 0; i < _actionRows.Count; i++)
         {
-            OptionsRowBorder.Visibility = Visibility.Collapsed;
-            ContextPreviewBorder.Visibility = Visibility.Collapsed;
-            return;
-        }
-
-        if (_highlighted.Options == ActionOptionKind.None)
-        {
-            OptionsRowBorder.Visibility = Visibility.Collapsed;
-            ContextPreviewBorder.Visibility = Visibility.Collapsed;
-            return;
-        }
-
-        OptionsRowBorder.Visibility = Visibility.Visible;
-
-        if (_highlighted.Options == ActionOptionKind.Context)
-        {
-            LanguageChipButton.Visibility = Visibility.Collapsed;
-            ContextChipButton.Visibility = Visibility.Visible;
-
-            var context = _surroundingContext;
-            if (context is null)
+            var entry = _actionRows[i];
+            if (entry.ChipButton is null)
             {
-                ContextChipButton.IsEnabled = false;
-                ContextChipButton.Content = "Context unavailable in this app";
-                OptionsHintText.Text = string.Empty;
-                ContextPreviewBorder.Visibility = Visibility.Collapsed;
+                continue;
+            }
+
+            var isHighlighted = _stage == PanelStage.ChooseAction && i == _selectedIndex;
+            if (!isHighlighted)
+            {
+                entry.ChipButton.Visibility = Visibility.Collapsed;
+                continue;
+            }
+
+            ConfigureRowChip(entry.ChipButton, entry.Action);
+            entry.ChipButton.Visibility = Visibility.Visible;
+        }
+
+        UpdateContextPreview();
+        UpdatePanelWidth();
+    }
+
+    private void ConfigureRowChip(Button chip, MenuAction action)
+    {
+        if (action.Options == ActionOptionKind.Context)
+        {
+            if (_surroundingContext is null)
+            {
+                chip.IsEnabled = false;
+                chip.Tag = "off";
+                chip.Content = "Context unavailable in this app";
                 return;
             }
 
-            ContextChipButton.IsEnabled = true;
-            var on = _settings.GetContextEnabled(_highlighted.Id);
-            ContextChipButton.Content = on ? "Context: on" : "Context: off";
-            OptionsHintText.Text = on
-                ? "Space toggles · preview below"
-                : "Space toggles";
-
-            if (on)
-            {
-                ContextPreviewBorder.Visibility = Visibility.Visible;
-                ContextPreviewHeaderText.Text = BuildContextHeader(context, "Context preview");
-                ContextPreviewBox.Text = BuildContextText(context);
-                ContextPreviewBox.Visibility = _contextPreviewExpanded
-                    ? Visibility.Visible
-                    : Visibility.Collapsed;
-            }
-            else
-            {
-                ContextPreviewBorder.Visibility = Visibility.Collapsed;
-            }
-
+            var on = _settings.GetContextEnabled(action.Id);
+            chip.IsEnabled = true;
+            chip.Tag = on ? "on" : "off";
+            chip.Content = on ? "Context: on" : "Context: off";
             return;
         }
 
-        ContextChipButton.Visibility = Visibility.Collapsed;
-        ContextPreviewBorder.Visibility = Visibility.Collapsed;
-        LanguageChipButton.Visibility = Visibility.Visible;
-        LanguageChipButton.IsEnabled = true;
-        LanguageChipButton.Content = $"Target: {_targetLanguage}";
-        OptionsHintText.Text = "Space cycles · Enter searches";
+        if (action.Options == ActionOptionKind.Language)
+        {
+            chip.IsEnabled = true;
+            chip.Tag = "on";
+            chip.Content = $"→ {_targetLanguage}";
+        }
+    }
+
+    private void UpdateContextPreview()
+    {
+        if (_stage != PanelStage.ChooseAction
+            || _highlighted is not { Options: ActionOptionKind.Context }
+            || _surroundingContext is null
+            || !_settings.GetContextEnabled(_highlighted.Id))
+        {
+            ContextPreviewBorder.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        ContextPreviewBorder.Visibility = Visibility.Visible;
+        ContextPreviewHeaderText.Text = BuildContextHeader(_surroundingContext, "Context preview");
+        ContextPreviewBox.Text = BuildContextText(_surroundingContext);
+        ContextPreviewBox.Visibility = _contextPreviewExpanded
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
+
+    private void UpdatePanelWidth()
+    {
+        var targetWidth = _stage == PanelStage.ChooseAction
+            ? (HasVisibleOptions ? WideMenuWidth : NarrowMenuWidth)
+            : DefaultPanelWidth;
+
+        if (Math.Abs(Width - targetWidth) > 0.5)
+        {
+            Width = targetWidth;
+        }
+    }
+
+    private static bool IsDescendantOf(DependencyObject? source, DependencyObject? ancestor)
+    {
+        if (source is null || ancestor is null)
+        {
+            return false;
+        }
+
+        var current = source;
+        while (current is not null)
+        {
+            if (ReferenceEquals(current, ancestor))
+            {
+                return true;
+            }
+
+            current = current is Visual or System.Windows.Media.Media3D.Visual3D
+                ? VisualTreeHelper.GetParent(current)
+                : LogicalTreeHelper.GetParent(current);
+        }
+
+        return false;
     }
 
     private void UpdatePromptOptions()
@@ -681,7 +794,7 @@ public partial class PanelWindow : Window
         {
             parts.Add(_filter.Length == 0 ? "Type to filter" : "Backspace deletes");
             parts.Add("Left back");
-            if (HasVisibleOptions && !_optionsFocused)
+            if (CanFocusCurrentChip && !_optionsFocused)
             {
                 parts.Add("Tab options");
             }
@@ -689,7 +802,7 @@ public partial class PanelWindow : Window
         else
         {
             parts.Add("Tab more actions");
-            if (HasVisibleOptions)
+            if (CanFocusCurrentChip)
             {
                 parts.Add("Space option");
             }
@@ -697,10 +810,15 @@ public partial class PanelWindow : Window
 
         if (_optionsFocused)
         {
-            parts.Add("Shift+Tab back");
+            parts.Add(_highlighted?.Options == ActionOptionKind.Language
+                ? "Space cycles · Enter picks · Esc back"
+                : "Space toggles · Esc back");
+        }
+        else
+        {
+            parts.Add("Esc closes");
         }
 
-        parts.Add("Esc closes");
         MenuHintText.Text = string.Join(" · ", parts);
     }
 
@@ -738,7 +856,7 @@ public partial class PanelWindow : Window
         }
         else
         {
-            UpdateOptionsRow();
+            UpdateRowOptions();
         }
     }
 
@@ -746,7 +864,7 @@ public partial class PanelWindow : Window
     {
         _targetLanguage = MenuModel.GetNextLanguage(_targetLanguage);
         _settings.SetTargetLanguage(_targetLanguage);
-        UpdateOptionsRow();
+        UpdateRowOptions();
     }
 
     private void ToggleOrCycleOption()
@@ -787,25 +905,11 @@ public partial class PanelWindow : Window
 
     private void FocusOptions()
     {
-        if (_highlighted is null)
-        {
-            return;
-        }
-
-        if (_highlighted.Options == ActionOptionKind.Context
-            && ContextChipButton.Visibility == Visibility.Visible
-            && ContextChipButton.IsEnabled)
+        if (GetSelectedChipButton() is { IsEnabled: true } chip)
         {
             _optionsFocused = true;
-            ContextChipButton.Focus();
-            Keyboard.Focus(ContextChipButton);
-        }
-        else if (_highlighted.Options == ActionOptionKind.Language
-            && LanguageChipButton.Visibility == Visibility.Visible)
-        {
-            _optionsFocused = true;
-            LanguageChipButton.Focus();
-            Keyboard.Focus(LanguageChipButton);
+            chip.Focus();
+            Keyboard.Focus(chip);
         }
 
         UpdateMenuHints();
@@ -841,7 +945,8 @@ public partial class PanelWindow : Window
 
         if (restoreFocus)
         {
-            _optionsFocused = HasVisibleOptions;
+            _optionsFocused = CanFocusCurrentChip;
+            UpdateMenuHints();
             FocusStageTarget();
         }
     }
@@ -911,8 +1016,9 @@ public partial class PanelWindow : Window
         _targetLanguage = trimmed;
 
         CloseLanguagePicker(restoreFocus: false);
-        _optionsFocused = _highlighted?.Options == ActionOptionKind.Language;
-        UpdateOptionsRow();
+        UpdateRowOptions();
+        _optionsFocused = _highlighted?.Options == ActionOptionKind.Language && CanFocusCurrentChip;
+        UpdateMenuHints();
         FocusStageTarget();
     }
 
@@ -1486,6 +1592,7 @@ public partial class PanelWindow : Window
             {
                 _optionsFocused = false;
                 FocusStageTarget();
+                UpdateMenuHints();
             }
             else
             {
@@ -1552,6 +1659,7 @@ public partial class PanelWindow : Window
             {
                 _optionsFocused = false;
                 FocusStageTarget();
+                UpdateMenuHints();
             }
             else if (_expanded)
             {
@@ -1636,6 +1744,7 @@ public partial class PanelWindow : Window
             {
                 _optionsFocused = false;
                 FocusStageTarget();
+                UpdateMenuHints();
                 return;
             }
 
@@ -1651,12 +1760,13 @@ public partial class PanelWindow : Window
         {
             _optionsFocused = false;
             FocusStageTarget();
+            UpdateMenuHints();
             return;
         }
 
         if (_expanded)
         {
-            if (HasVisibleOptions)
+            if (CanFocusCurrentChip)
             {
                 FocusOptions();
             }
@@ -1901,6 +2011,10 @@ public partial class PanelWindow : Window
         if (_highlighted is { Options: ActionOptionKind.Context } action)
         {
             ToggleContext(action.Id);
+            if (!_optionsFocused)
+            {
+                FocusStageTarget();
+            }
         }
     }
 
@@ -1922,7 +2036,7 @@ public partial class PanelWindow : Window
         }
         else
         {
-            UpdateOptionsRow();
+            UpdateRowOptions();
         }
     }
 
