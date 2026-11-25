@@ -18,41 +18,41 @@
         FontFamily="Segoe UI"
         FontSize="13">
   <Window.Resources>
-    <Style x:Key="OptionChipButtonStyle" TargetType="Button">
-      <Setter Property="Background" Value="#2A2A35" />
-      <Setter Property="Foreground" Value="#93C5FD" />
-      <Setter Property="BorderBrush" Value="#3B3B48" />
+    <Geometry x:Key="ContextIconGeometry">M 3.5,3 L 1.5,3 L 1.5,13 L 3.5,13 M 12.5,3 L 14.5,3 L 14.5,13 L 12.5,13 M 11,4 L 7,4 A 2,2 0 0 0 7,8 L 8,8 M 8,4 L 8,12.5 M 10,4 L 10,12.5</Geometry>
+    <Geometry x:Key="ContextSlashGeometry">M 2,14 L 14,2</Geometry>
+    <Geometry x:Key="GlobeIconGeometry">M 4.5,1 A 3.5,3.5 0 1 0 4.5,8 A 3.5,3.5 0 1 0 4.5,1 M 1,4.5 L 8,4.5 M 4.5,1 A 1.75,3.5 0 0 0 4.5,8 A 1.75,3.5 0 0 0 4.5,1</Geometry>
+    <Geometry x:Key="LockIconGeometry">M 3.5,5 L 3.5,3.5 A 2,2 0 0 1 7.5,3.5 L 7.5,5 M 2,5 L 9,5 L 9,10 L 2,10 Z</Geometry>
+
+    <Style x:Key="OptionIconButtonStyle" TargetType="Button">
+      <Setter Property="Width" Value="18" />
+      <Setter Property="Height" Value="18" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="Transparent" />
       <Setter Property="BorderThickness" Value="1" />
-      <Setter Property="FontSize" Value="11.5" />
-      <Setter Property="FontWeight" Value="Medium" />
-      <Setter Property="Padding" Value="8,3" />
+      <Setter Property="Padding" Value="0" />
       <Setter Property="VerticalAlignment" Value="Center" />
       <Setter Property="HorizontalAlignment" Value="Right" />
       <Setter Property="Focusable" Value="True" />
       <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+      <Setter Property="ToolTipService.ShowOnDisabled" Value="True" />
       <Setter Property="Cursor" Value="Hand" />
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Border Background="{TemplateBinding Background}"
-                    BorderBrush="{TemplateBinding BorderBrush}"
-                    BorderThickness="{TemplateBinding BorderThickness}"
-                    CornerRadius="4"
-                    Padding="{TemplateBinding Padding}"
-                    SnapsToDevicePixels="True">
+            <Grid Width="18" Height="18" Background="Transparent">
+              <Border Background="{TemplateBinding Background}"
+                      BorderBrush="{TemplateBinding BorderBrush}"
+                      BorderThickness="{TemplateBinding BorderThickness}"
+                      CornerRadius="4"
+                      SnapsToDevicePixels="True" />
               <ContentPresenter HorizontalAlignment="Center"
                                 VerticalAlignment="Center"
                                 RecognizesAccessKey="False" />
-            </Border>
+            </Grid>
           </ControlTemplate>
         </Setter.Value>
       </Setter>
       <Style.Triggers>
-        <Trigger Property="Tag" Value="off">
-          <Setter Property="Background" Value="#22232C" />
-          <Setter Property="Foreground" Value="#9CA3AF" />
-          <Setter Property="BorderBrush" Value="#333440" />
-        </Trigger>
         <Trigger Property="IsMouseOver" Value="True">
           <Setter Property="Background" Value="#32384A" />
           <Setter Property="BorderBrush" Value="#4E5873" />
@@ -60,15 +60,67 @@
         <Trigger Property="IsKeyboardFocused" Value="True">
           <Setter Property="Background" Value="#28354E" />
           <Setter Property="BorderBrush" Value="#60A5FA" />
-          <Setter Property="Foreground" Value="#F9FAFB" />
         </Trigger>
         <Trigger Property="IsEnabled" Value="False">
-          <Setter Property="Background" Value="#202028" />
-          <Setter Property="BorderBrush" Value="#2E2E38" />
-          <Setter Property="Foreground" Value="#6B7280" />
+          <Setter Property="Background" Value="Transparent" />
+          <Setter Property="BorderBrush" Value="Transparent" />
+          <Setter Property="Opacity" Value="0.5" />
           <Setter Property="Cursor" Value="Arrow" />
         </Trigger>
       </Style.Triggers>
+    </Style>
+
+    <Style x:Key="EditableInputBoxStyle" TargetType="TextBox">
+      <Setter Property="Background" Value="#1B1B22" />
+      <Setter Property="Foreground" Value="#F3F4F6" />
+      <Setter Property="CaretBrush" Value="#F3F4F6" />
+      <Setter Property="BorderBrush" Value="#2A2A34" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Padding" Value="8,7" />
+      <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="TextBox">
+            <Border Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="4"
+                    SnapsToDevicePixels="True">
+              <ScrollViewer x:Name="PART_ContentHost"
+                            Focusable="False"
+                            HorizontalScrollBarVisibility="{TemplateBinding HorizontalScrollBarVisibility}"
+                            VerticalScrollBarVisibility="{TemplateBinding VerticalScrollBarVisibility}" />
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+      <Style.Triggers>
+        <Trigger Property="IsKeyboardFocused" Value="True">
+          <Setter Property="BorderBrush" Value="#3B82F6" />
+        </Trigger>
+      </Style.Triggers>
+    </Style>
+
+    <Style x:Key="ReadOnlyOutputBoxStyle" TargetType="TextBox">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Foreground" Value="#D1D5DB" />
+      <Setter Property="CaretBrush" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Padding" Value="8,7" />
+      <Setter Property="IsReadOnly" Value="True" />
+      <Setter Property="IsReadOnlyCaretVisible" Value="False" />
+      <Setter Property="IsTabStop" Value="False" />
+      <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="TextBox">
+            <ScrollViewer x:Name="PART_ContentHost"
+                          Focusable="False"
+                          HorizontalScrollBarVisibility="{TemplateBinding HorizontalScrollBarVisibility}"
+                          VerticalScrollBarVisibility="{TemplateBinding VerticalScrollBarVisibility}" />
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
     </Style>
   </Window.Resources>
   <Border Background="#1E1E24"
@@ -268,18 +320,14 @@
 
           <TextBlock x:Name="PromptTitleText"
                      Grid.Row="0"
-                     Foreground="#D1D5DB"
+                     Foreground="#F3F4F6"
+                     FontWeight="SemiBold"
                      FontSize="12"
                      Margin="0,0,0,6" />
 
           <TextBox x:Name="PromptInputBox"
                    Grid.Row="1"
-                   Background="#141419"
-                   Foreground="#F3F4F6"
-                   CaretBrush="#F3F4F6"
-                   BorderBrush="#3B3B48"
-                   BorderThickness="1"
-                   Padding="8,7"
+                   Style="{StaticResource EditableInputBoxStyle}"
                    TextWrapping="Wrap"
                    VerticalScrollBarVisibility="Auto"
                    AcceptsReturn="True" />
@@ -379,26 +427,58 @@
               <ColumnDefinition Width="*" />
               <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <TextBlock x:Name="PreviewActionText"
-                       Foreground="#93C5FD"
-                       FontWeight="SemiBold"
-                       FontSize="12" />
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+              <Path x:Name="PreviewLockIcon"
+                    Data="{StaticResource LockIconGeometry}"
+                    Width="11"
+                    Height="11"
+                    Stretch="None"
+                    Stroke="#9CA3AF"
+                    StrokeThickness="1.15"
+                    StrokeStartLineCap="Round"
+                    StrokeEndLineCap="Round"
+                    StrokeLineJoin="Round"
+                    VerticalAlignment="Center"
+                    Margin="0,0,5,0"
+                    Visibility="Collapsed" />
+              <TextBlock x:Name="PreviewActionText"
+                         Foreground="#9CA3AF"
+                         FontWeight="SemiBold"
+                         FontSize="12"
+                         VerticalAlignment="Center" />
+            </StackPanel>
             <TextBlock x:Name="PreviewStatusText"
                        Grid.Column="1"
-                       Foreground="#9CA3AF"
-                       FontSize="12" />
+                       Foreground="#6B7280"
+                       FontSize="11.5"
+                       VerticalAlignment="Center" />
           </Grid>
 
-          <TextBox x:Name="PreviewBox"
-                   Grid.Row="1"
-                   Background="#141419"
-                   Foreground="#F3F4F6"
-                   BorderBrush="#3B3B48"
-                   BorderThickness="1"
-                   Padding="8,7"
-                   IsReadOnly="True"
-                   TextWrapping="Wrap"
-                   VerticalScrollBarVisibility="Auto" />
+          <Border x:Name="PreviewBoxBorder"
+                  Grid.Row="1"
+                  Background="#141419"
+                  BorderBrush="#2A2A34"
+                  BorderThickness="1"
+                  CornerRadius="4"
+                  SnapsToDevicePixels="True">
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+              </Grid.ColumnDefinitions>
+              <Border x:Name="PreviewStreamingAccentBar"
+                      Grid.Column="0"
+                      Width="2"
+                      Background="#2563EB"
+                      CornerRadius="3,0,0,3"
+                      Visibility="Collapsed" />
+              <TextBox x:Name="PreviewBox"
+                       Grid.Column="1"
+                       Style="{StaticResource ReadOnlyOutputBoxStyle}"
+                       TextWrapping="Wrap"
+                       VerticalScrollBarVisibility="Auto" />
+            </Grid>
+          </Border>
 
           <TextBlock x:Name="ReadOnlyNoticeText"
                      Grid.Row="2"
@@ -443,7 +523,7 @@
                       Visibility="Collapsed"
                       Click="OnSecondaryActionButtonClick" />
               <Button x:Name="SecondaryButton"
-                      Content="Discard"
+                      Content="Back"
                       Padding="9,4"
                       Margin="0,0,6,0"
                       Background="#2A2A34"

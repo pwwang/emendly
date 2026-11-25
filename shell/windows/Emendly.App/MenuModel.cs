@@ -169,6 +169,67 @@ public static class MenuModel
         "Ukrainian",
     };
 
+    private static readonly Dictionary<string, string> LanguageCodes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["German"] = "DE",
+        ["English"] = "EN",
+        ["Spanish"] = "ES",
+        ["French"] = "FR",
+        ["Italian"] = "IT",
+        ["Portuguese"] = "PT",
+        ["Dutch"] = "NL",
+        ["Polish"] = "PL",
+        ["Russian"] = "RU",
+        ["Chinese (Simplified)"] = "ZH",
+        ["Chinese (Traditional)"] = "ZH",
+        ["Japanese"] = "JA",
+        ["Korean"] = "KO",
+        ["Arabic"] = "AR",
+        ["Hindi"] = "HI",
+        ["Turkish"] = "TR",
+        ["Swedish"] = "SV",
+        ["Norwegian"] = "NO",
+        ["Danish"] = "DA",
+        ["Finnish"] = "FI",
+        ["Czech"] = "CS",
+        ["Greek"] = "EL",
+        ["Hebrew"] = "HE",
+        ["Vietnamese"] = "VI",
+        ["Thai"] = "TH",
+        ["Indonesian"] = "ID",
+        ["Ukrainian"] = "UK",
+    };
+
+    public static string GetLanguageCode(string? language)
+    {
+        if (string.IsNullOrWhiteSpace(language))
+        {
+            return "??";
+        }
+
+        var trimmed = language.Trim();
+        if (LanguageCodes.TryGetValue(trimmed, out var code))
+        {
+            return code;
+        }
+
+        var letters = new char[2];
+        var count = 0;
+        foreach (var ch in trimmed)
+        {
+            if (char.IsLetter(ch))
+            {
+                letters[count++] = char.ToUpperInvariant(ch);
+                if (count == 2)
+                {
+                    return new string(letters);
+                }
+            }
+        }
+
+        return count == 1 ? new string(letters, 0, 1) : "??";
+    }
+
     public static IReadOnlyList<MenuAction> GetDefault(SelectionState state) =>
         state switch
         {
