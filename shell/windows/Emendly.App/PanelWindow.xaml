@@ -25,6 +25,8 @@
     <Geometry x:Key="ContextSlashGeometry">M 2,14 L 14,2</Geometry>
     <Geometry x:Key="GlobeIconGeometry">M 4.5,1 A 3.5,3.5 0 1 0 4.5,8 A 3.5,3.5 0 1 0 4.5,1 M 1,4.5 L 8,4.5 M 4.5,1 A 1.75,3.5 0 0 0 4.5,8 A 1.75,3.5 0 0 0 4.5,1</Geometry>
     <Geometry x:Key="LockIconGeometry">M 3.5,5 L 3.5,3.5 A 2,2 0 0 1 7.5,3.5 L 7.5,5 M 2,5 L 9,5 L 9,10 L 2,10 Z</Geometry>
+    <Geometry x:Key="SettingsIconGeometry">M 6.09,3.38 L 6.63,1.13 L 9.37,1.13 L 9.91,3.38 L 11.89,2.18 L 13.82,4.11 L 12.62,6.09 L 14.87,6.63 L 14.87,9.37 L 12.62,9.91 L 13.82,11.89 L 11.89,13.82 L 9.91,12.62 L 9.37,14.87 L 6.63,14.87 L 6.09,12.62 L 4.11,13.82 L 2.18,11.89 L 3.38,9.91 L 1.13,9.37 L 1.13,6.63 L 3.38,6.09 L 2.18,4.11 L 4.11,2.18 Z M 5.7,8 A 2.3,2.3 0 1 0 10.3,8 A 2.3,2.3 0 1 0 5.7,8</Geometry>
+    <Geometry x:Key="CloseIconGeometry">M 3.5,3.5 L 12.5,12.5 M 12.5,3.5 L 3.5,12.5</Geometry>
 
         <Style x:Key="ContextChipButtonStyle" TargetType="Button">
       <Setter Property="Padding" Value="8,3" />
@@ -90,6 +92,42 @@
           </ControlTemplate>
         </Setter.Value>
       </Setter>
+    </Style>
+
+    <Style x:Key="SettingsValueButtonStyle" TargetType="Button">
+      <Setter Property="MinWidth" Value="88" />
+      <Setter Property="Padding" Value="10,4" />
+      <Setter Property="Background" Value="#2A2A34" />
+      <Setter Property="Foreground" Value="#E5E7EB" />
+      <Setter Property="BorderBrush" Value="#3B3B48" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="4"
+                    Padding="{TemplateBinding Padding}"
+                    SnapsToDevicePixels="True">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+      <Style.Triggers>
+        <Trigger Property="IsMouseOver" Value="True">
+          <Setter Property="Background" Value="#32384A" />
+          <Setter Property="BorderBrush" Value="#4E5873" />
+        </Trigger>
+        <Trigger Property="IsKeyboardFocused" Value="True">
+          <Setter Property="BorderBrush" Value="#60A5FA" />
+          <Setter Property="Background" Value="#263148" />
+        </Trigger>
+      </Style.Triggers>
     </Style>
 
     <Style x:Key="OptionIconButtonStyle" TargetType="Button">
@@ -222,17 +260,41 @@
                    FontSize="12.5"
                    VerticalAlignment="Center"
                    TextTrimming="CharacterEllipsis" />
-        <Border Grid.Column="1"
-                Background="#2A2A35"
-                CornerRadius="4"
-                Padding="6,2"
-                Margin="8,0,0,0"
-                VerticalAlignment="Center">
-          <TextBlock x:Name="ModeBadgeText"
-                     Foreground="#93C5FD"
-                     FontSize="11"
-                     FontWeight="Medium" />
-        </Border>
+        <StackPanel Grid.Column="1"
+                    Orientation="Horizontal"
+                    Margin="8,0,0,0"
+                    VerticalAlignment="Center">
+          <Button x:Name="SettingsHeaderButton"
+                  Style="{StaticResource OptionIconButtonStyle}"
+                  Margin="0,0,4,0"
+                  ToolTip="Settings"
+                  Click="OnSettingsButtonClick">
+            <Path Data="{StaticResource SettingsIconGeometry}"
+                  Width="16"
+                  Height="16"
+                  Stretch="None"
+                  Stroke="#B6BDCB"
+                  StrokeThickness="1.1"
+                  StrokeStartLineCap="Round"
+                  StrokeEndLineCap="Round"
+                  StrokeLineJoin="Round"
+                  SnapsToDevicePixels="True" />
+          </Button>
+          <Button x:Name="CloseHeaderButton"
+                  Style="{StaticResource OptionIconButtonStyle}"
+                  ToolTip="Close"
+                  Click="OnCloseButtonClick">
+            <Path Data="{StaticResource CloseIconGeometry}"
+                  Width="16"
+                  Height="16"
+                  Stretch="None"
+                  Stroke="#B6BDCB"
+                  StrokeThickness="1.2"
+                  StrokeStartLineCap="Round"
+                  StrokeEndLineCap="Round"
+                  SnapsToDevicePixels="True" />
+          </Button>
+        </StackPanel>
       </Grid>
 
       <!-- Long selection notice (> 4,000 chars) -->
@@ -604,6 +666,84 @@
                       BorderBrush="#3B82F6"
                       Click="OnPrimaryButtonClick" />
             </StackPanel>
+          </Grid>
+        </Grid>
+
+        <!-- Settings stage -->
+        <Grid x:Name="SettingsPanel" Visibility="Collapsed">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+          </Grid.RowDefinitions>
+
+          <TextBlock x:Name="SettingsHeadingText"
+                     Grid.Row="0"
+                     Text="Settings"
+                     Visibility="Collapsed"
+                     Foreground="#F3F4F6"
+                     FontWeight="SemiBold"
+                     FontSize="14"
+                     Margin="0,0,0,10" />
+
+          <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="Shortcut"
+                       Foreground="#D1D5DB"
+                       FontSize="12.5"
+                       VerticalAlignment="Center" />
+            <Button x:Name="ShortcutButton"
+                    Grid.Column="1"
+                    Style="{StaticResource SettingsValueButtonStyle}"
+                    Click="OnShortcutButtonClick" />
+          </Grid>
+
+          <TextBlock x:Name="ShortcutErrorText"
+                     Grid.Row="2"
+                     Text="That shortcut is already in use."
+                     Foreground="#F87171"
+                     FontSize="11.5"
+                     Margin="0,6,0,0"
+                     TextWrapping="Wrap"
+                     Visibility="Collapsed" />
+
+          <Grid Grid.Row="3" Margin="0,10,0,0">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="Default language"
+                       Foreground="#D1D5DB"
+                       FontSize="12.5"
+                       VerticalAlignment="Center" />
+            <Button x:Name="DefaultLanguageButton"
+                    Grid.Column="1"
+                    Style="{StaticResource SettingsValueButtonStyle}"
+                    Click="OnDefaultLanguageButtonClick" />
+          </Grid>
+
+          <Grid Grid.Row="4" Margin="0,16,0,0">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="Esc back"
+                       Foreground="#6B7280"
+                       FontSize="11"
+                       VerticalAlignment="Center" />
+            <Button x:Name="SettingsDoneButton"
+                    Grid.Column="1"
+                    Content="Done"
+                    Padding="12,4"
+                    Background="#2563EB"
+                    Foreground="#FFFFFF"
+                    BorderBrush="#3B82F6"
+                    Click="OnSettingsDoneClick" />
           </Grid>
         </Grid>
 

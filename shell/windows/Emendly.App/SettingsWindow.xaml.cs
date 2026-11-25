@@ -40,7 +40,7 @@ public partial class SettingsWindow : Window
 
         if (!HotkeyWindow.TryParseHotkey(HotkeyBox.Text, out _, out _, out var normalized))
         {
-            ShowValidation("Hotkey must include a modifier and a key (for example: Ctrl+Alt+E).");
+            ShowValidation("Hotkey must be a function key such as F6, or a key with a modifier (for example: Ctrl+Alt+E).");
             return;
         }
 

@@ -88,7 +88,7 @@ public sealed class HotkeyWindow : IDisposable
 
         if (!TryParseHotkey(hotkeySpec, out var modifiers, out var virtualKey, out var normalized))
         {
-            error = $"Invalid hotkey '{hotkeySpec}'. Use a modifier plus a key such as Ctrl+Alt+E.";
+            error = $"Invalid hotkey '{hotkeySpec}'. Use a key with a modifier, or a function key such as F6.";
             return false;
         }
 
@@ -133,7 +133,7 @@ public sealed class HotkeyWindow : IDisposable
         }
 
         var tokens = spec.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (tokens.Length < 2)
+        if (tokens.Length == 0)
         {
             return false;
         }
@@ -194,7 +194,7 @@ public sealed class HotkeyWindow : IDisposable
             }
         }
 
-        if (modifiers == 0 || key is null)
+        if (key is null || (modifiers == 0 && !IsFunctionKey(key.Value)))
         {
             return false;
         }
@@ -232,7 +232,9 @@ public sealed class HotkeyWindow : IDisposable
         return Enum.TryParse(token, ignoreCase: true, out key) && key != Key.None;
     }
 
-    private static string FormatKeyName(Key key)
+    public static bool IsFunctionKey(Key key) => key is >= Key.F1 and <= Key.F24;
+
+    public static string FormatKeyName(Key key)
     {
         if (key is >= Key.D0 and <= Key.D9)
         {
@@ -240,6 +242,51 @@ public sealed class HotkeyWindow : IDisposable
         }
 
         return key.ToString();
+    }
+
+    public static string FormatCombination(ModifierKeys modifiers, Key key)
+    {
+        var parts = new List<string>(5);
+        if ((modifiers & ModifierKeys.Control) != 0)
+        {
+            parts.Add("Ctrl");
+        }
+
+        if ((modifiers & ModifierKeys.Alt) != 0)
+        {
+            parts.Add("Alt");
+        }
+
+        if ((modifiers & ModifierKeys.Shift) != 0)
+        {
+            parts.Add("Shift");
+        }
+
+        if ((modifiers & ModifierKeys.Windows) != 0)
+        {
+            parts.Add("Win");
+        }
+
+        parts.Add(FormatKeyName(key));
+        return string.Join("+", parts);
+    }
+
+    public bool TryReplace(string hotkeySpec, out string applied, out string? error)
+    {
+        var previous = RegisteredHotkey;
+        if (Register(hotkeySpec, out error))
+        {
+            applied = RegisteredHotkey ?? hotkeySpec;
+            return true;
+        }
+
+        applied = previous ?? string.Empty;
+        if (!string.IsNullOrEmpty(previous))
+        {
+            _ = Register(previous, out _);
+        }
+
+        return false;
     }
 
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)

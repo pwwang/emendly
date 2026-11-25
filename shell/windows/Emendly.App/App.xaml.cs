@@ -253,7 +253,8 @@ public partial class App : Application
             inserter: _inserter,
             unsupportedReason: unsupportedReason,
             strategyName: snapshot.StrategyName,
-            editorHwnd: snapshot.EditorHwnd);
+            editorHwnd: snapshot.EditorHwnd,
+            hotkeyWindow: _hotkeyWindow);
 
         panel.PasteCompleted += (_, _) => UpdateUndoMenuItem();
         panel.ActivationFailed += (_, _) => ShowNotice(

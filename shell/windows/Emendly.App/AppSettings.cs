@@ -19,7 +19,7 @@ public sealed class AppSettings
 {
     public const string DefaultBaseUrl = "https://api.openai.com/v1";
     public const string DefaultModel = "gpt-5-mini";
-    public const string DefaultHotkey = "Ctrl+Alt+E";
+    public const string DefaultHotkey = "F6";
 
     [JsonPropertyName("base_url")]
     public string BaseUrl { get; set; } = DefaultBaseUrl;
@@ -48,49 +48,134 @@ public sealed class AppSettings
 
     public static string UserSettingsPath =>
         Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "Emendly",
-            "appsettings.json");
+            "settings.json");
 
     public static string BundledSettingsPath =>
         Path.Combine(AppContext.BaseDirectory, "appsettings.json");
 
     public static AppSettings Load()
     {
-        var path = File.Exists(UserSettingsPath) ? UserSettingsPath : BundledSettingsPath;
-        if (!File.Exists(path))
-        {
-            return new AppSettings();
-        }
+        var settings = new AppSettings();
+        ApplyFile(settings, BundledSettingsPath);
+        ApplyFile(settings, UserSettingsPath);
+        return settings;
+    }
 
+    private static void ApplyFile(AppSettings target, string path)
+    {
+        string raw;
         try
         {
-            var raw = File.ReadAllText(path);
-            var parsed = JsonSerializer.Deserialize<AppSettings>(raw, JsonOptions);
-            if (parsed is null)
+            if (!File.Exists(path))
             {
-                return new AppSettings();
+                return;
             }
 
-            parsed.BaseUrl = string.IsNullOrWhiteSpace(parsed.BaseUrl) ? DefaultBaseUrl : parsed.BaseUrl.Trim();
-            parsed.Model = string.IsNullOrWhiteSpace(parsed.Model) ? DefaultModel : parsed.Model.Trim();
-            parsed.Hotkey = string.IsNullOrWhiteSpace(parsed.Hotkey) ? DefaultHotkey : parsed.Hotkey.Trim();
-            parsed.Language ??= new LanguageSettings();
-            parsed.Language.DefaultTarget = string.IsNullOrWhiteSpace(parsed.Language.DefaultTarget)
-                ? LanguageSettings.DefaultTargetLanguage
-                : parsed.Language.DefaultTarget.Trim();
-            parsed.TargetLanguage = string.IsNullOrWhiteSpace(parsed.TargetLanguage)
-                ? null
-                : parsed.TargetLanguage.Trim();
-            parsed.ContextEnabled = parsed.ContextEnabled is not null
-                ? new Dictionary<string, bool>(parsed.ContextEnabled, StringComparer.Ordinal)
-                : new Dictionary<string, bool>(StringComparer.Ordinal);
-            return parsed;
+            raw = File.ReadAllText(path);
         }
         catch (Exception)
         {
-            return new AppSettings();
+            return;
         }
+
+        JsonDocument document;
+        try
+        {
+            document = JsonDocument.Parse(raw);
+        }
+        catch (JsonException)
+        {
+            return;
+        }
+
+        using (document)
+        {
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                return;
+            }
+
+            if (TryGetString(root, "base_url", out var baseUrl) && !string.IsNullOrWhiteSpace(baseUrl))
+            {
+                target.BaseUrl = baseUrl.Trim();
+            }
+
+            if (TryGetString(root, "model", out var model) && !string.IsNullOrWhiteSpace(model))
+            {
+                target.Model = model.Trim();
+            }
+
+            if (TryGetString(root, "hotkey", out var hotkey) && !string.IsNullOrWhiteSpace(hotkey))
+            {
+                target.Hotkey = hotkey.Trim();
+            }
+
+            if (TryGetString(root, "target_language", out var languageOverride)
+                && !string.IsNullOrWhiteSpace(languageOverride))
+            {
+                target.TargetLanguage = languageOverride.Trim();
+            }
+
+            if (TryGetObject(root, "language", out var language)
+                && TryGetString(language, "default_target", out var defaultTarget)
+                && !string.IsNullOrWhiteSpace(defaultTarget))
+            {
+                target.Language.DefaultTarget = defaultTarget.Trim();
+            }
+
+            if (TryGetObject(root, "context_enabled", out var contextEnabled))
+            {
+                foreach (var property in contextEnabled.EnumerateObject())
+                {
+                    if (property.Value.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                    {
+                        target.ContextEnabled[property.Name] = property.Value.GetBoolean();
+                    }
+                }
+            }
+        }
+    }
+
+    private static bool TryGetString(JsonElement element, string name, out string? value)
+    {
+        if (TryGetProperty(element, name, out var property) && property.ValueKind == JsonValueKind.String)
+        {
+            value = property.GetString();
+            return true;
+        }
+
+        value = null;
+        return false;
+    }
+
+    private static bool TryGetObject(JsonElement element, string name, out JsonElement value)
+    {
+        if (TryGetProperty(element, name, out var property) && property.ValueKind == JsonValueKind.Object)
+        {
+            value = property;
+            return true;
+        }
+
+        value = default;
+        return false;
+    }
+
+    private static bool TryGetProperty(JsonElement element, string name, out JsonElement value)
+    {
+        foreach (var property in element.EnumerateObject())
+        {
+            if (string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                value = property.Value;
+                return true;
+            }
+        }
+
+        value = default;
+        return false;
     }
 
     public bool GetContextEnabled(string actionId) =>
@@ -127,6 +212,19 @@ public sealed class AppSettings
             return;
         }
 
+        TargetLanguage = trimmed;
+        Save();
+    }
+
+    public void SetDefaultLanguage(string language)
+    {
+        var trimmed = language.Trim();
+        if (string.IsNullOrEmpty(trimmed))
+        {
+            return;
+        }
+
+        Language.DefaultTarget = trimmed;
         TargetLanguage = trimmed;
         Save();
     }
@@ -344,6 +442,18 @@ public static class ShellLogger
             action,
             app = processName,
             options,
+        });
+
+        Append(record);
+    }
+
+    public static void LogHotkey(string value)
+    {
+        var record = JsonSerializer.Serialize(new
+        {
+            ts = DateTimeOffset.UtcNow.ToString("O"),
+            @event = "hotkey",
+            value,
         });
 
         Append(record);
