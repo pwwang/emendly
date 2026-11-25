@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -88,6 +86,26 @@ impl EngineError {
     }
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ActionOptions {
+    pub include_context: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_before: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_after: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_lang: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instruction: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tone: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub brief: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Request {
     pub id: String,
@@ -112,7 +130,7 @@ pub enum RequestKind {
         #[serde(default)]
         text: String,
         #[serde(default)]
-        options: BTreeMap<String, serde_json::Value>,
+        options: ActionOptions,
         #[serde(default)]
         context: Option<String>,
         #[serde(default)]
@@ -277,5 +295,34 @@ mod tests {
         );
         let (id, e) = parse_request(r#"{"id":"x1","type":"nope"}"#).unwrap_err();
         assert_eq!((id.as_str(), e.code()), ("x1", ErrorCode::BadRequest));
+    }
+
+    #[test]
+    fn parses_action_options_and_ignores_unknown_fields() {
+        let req = parse_request(
+            r#"{"id":"o1","type":"actions.run","action":"custom","text":"hi","options":{"include_context":true,"context_before":"before","context_after":"after","target_lang":"French","instruction":"tighten","unknown_num":42,"unknown_obj":{"a":1}}}"#,
+        )
+        .unwrap();
+        let RequestKind::ActionsRun { options, .. } = req.kind else {
+            panic!("expected ActionsRun");
+        };
+        assert!(options.include_context);
+        assert_eq!(options.context_before.as_deref(), Some("before"));
+        assert_eq!(options.context_after.as_deref(), Some("after"));
+        assert_eq!(options.target_lang.as_deref(), Some("French"));
+        assert_eq!(options.instruction.as_deref(), Some("tighten"));
+
+        let default_req = parse_request(
+            r#"{"id":"o2","type":"actions.run","action":"proofread","text":"hi"}"#,
+        )
+        .unwrap();
+        let RequestKind::ActionsRun { options, .. } = default_req.kind else {
+            panic!("expected ActionsRun");
+        };
+        assert!(!options.include_context);
+        assert_eq!(options.context_before, None);
+        assert_eq!(options.context_after, None);
+        assert_eq!(options.target_lang, None);
+        assert_eq!(options.instruction, None);
     }
 }

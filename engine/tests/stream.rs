@@ -2,6 +2,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{env, fs, thread};
@@ -12,11 +13,16 @@ struct TempConfig(PathBuf);
 
 impl TempConfig {
     fn new(base_url: &str, timeout_ms: u64) -> Self {
+        static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+        let seq = NEXT_ID.fetch_add(1, Ordering::Relaxed);
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let path = env::temp_dir().join(format!("emendly-it-{}-{nanos}.toml", std::process::id()));
+        let path = env::temp_dir().join(format!(
+            "emendly-it-{}-{nanos}-{seq}.toml",
+            std::process::id()
+        ));
         fs::write(
             &path,
             format!("[provider]\nbase_url = \"{base_url}\"\nmodel = \"gpt-5-mini\"\ntimeout_ms = {timeout_ms}\n"),
@@ -298,7 +304,7 @@ fn provider_auth_and_control_requests_work() {
 
     assert!(seen
         .iter()
-        .any(|e| e["id"] == "r2" && e["actions"].as_array().unwrap().len() == 5));
+        .any(|e| e["id"] == "r2" && e["actions"].as_array().unwrap().len() == 9));
     assert!(seen
         .iter()
         .any(|e| e["id"] == "r3" && e["event"] == "config"));
@@ -317,4 +323,104 @@ fn provider_auth_and_control_requests_work() {
     assert!(seen
         .iter()
         .any(|e| e["id"] == "a1" && e["code"] == "provider_auth" && e["retryable"] == false));
+}
+
+fn send_until_terminal(
+    stdin: &mut std::process::ChildStdin,
+    lines: &mut std::io::Lines<BufReader<std::process::ChildStdout>>,
+    req: &str,
+) -> Vec<Value> {
+    writeln!(stdin, "{req}").unwrap();
+    stdin.flush().unwrap();
+    let mut events = Vec::new();
+    for line in lines {
+        let ev: Value = serde_json::from_str(&line.unwrap()).unwrap();
+        let terminal = matches!(ev["event"].as_str(), Some("done" | "error" | "cancelled"));
+        events.push(ev);
+        if terminal {
+            break;
+        }
+    }
+    events
+}
+
+#[test]
+fn menu_actions_options_and_context_handling() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (req_tx, req_rx) = mpsc::channel();
+
+    let server = thread::spawn(move || {
+        for _ in 0..3 {
+            let (mut stream, _) = listener.accept().unwrap();
+            req_tx.send(read_http_request(&mut stream)).unwrap();
+            let resp = concat!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n",
+                "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n",
+                "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":2}}\n\n",
+                "data: [DONE]\n\n"
+            );
+            stream.write_all(resp.as_bytes()).unwrap();
+            stream.flush().unwrap();
+        }
+    });
+
+    let cfg = TempConfig::new(&format!("http://{addr}/v1"), 10_000);
+    let mut child = spawn_engine(Some(&cfg), Some("test-mock-key"), &[]);
+    let mut stdin = child.stdin.take().unwrap();
+    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+
+    let missing_inst = send_until_terminal(
+        &mut stdin,
+        &mut lines,
+        r#"{"id":"c0","type":"actions.run","action":"custom","text":"hi"}"#,
+    );
+    assert_eq!(missing_inst.len(), 1);
+    assert_eq!(missing_inst[0]["event"], "error");
+    assert_eq!(missing_inst[0]["code"], "bad_request");
+
+    let custom_events = send_until_terminal(
+        &mut stdin,
+        &mut lines,
+        r#"{"id":"c1","type":"actions.run","action":"custom","text":"Draft.","options":{"instruction":"Tighten this","include_context":true,"context_before":"Before line.","context_after":"After line.","ignored_extra":true}}"#,
+    );
+    assert_eq!(custom_events.last().unwrap()["event"], "done");
+    let (_, body1) = req_rx.recv().unwrap();
+    let json1: Value = serde_json::from_slice(&body1).unwrap();
+    assert_eq!(
+        json1["messages"][1]["content"].as_str().unwrap(),
+        "Context before:\nBefore line.\n\nContext after:\nAfter line.\n\nInstruction: Tighten this\n\nDraft."
+    );
+
+    let no_ctx_events = send_until_terminal(
+        &mut stdin,
+        &mut lines,
+        r#"{"id":"c2","type":"actions.run","action":"rewrite","text":"Ship it.","options":{"include_context":false,"context_before":"Secret before","context_after":"Secret after"}}"#,
+    );
+    assert_eq!(no_ctx_events.last().unwrap()["event"], "done");
+    let (_, body2) = req_rx.recv().unwrap();
+    let json2: Value = serde_json::from_slice(&body2).unwrap();
+    let msg2 = json2["messages"][1]["content"].as_str().unwrap();
+    assert!(!msg2.contains("Context before:"));
+    assert!(!msg2.contains("Context after:"));
+    assert!(!msg2.contains("Secret before"));
+    assert!(!msg2.contains("Secret after"));
+    assert!(msg2.contains("Ship it."));
+
+    let translate_events = send_until_terminal(
+        &mut stdin,
+        &mut lines,
+        r#"{"id":"c3","type":"actions.run","action":"translate","text":"Hello","options":{"target_lang":"Japanese"}}"#,
+    );
+    assert_eq!(translate_events.last().unwrap()["event"], "done");
+    let (_, body3) = req_rx.recv().unwrap();
+    let json3: Value = serde_json::from_slice(&body3).unwrap();
+    let msg3 = json3["messages"][1]["content"].as_str().unwrap();
+    assert!(msg3.contains("Target language: Japanese"));
+    assert!(msg3.contains("Hello"));
+
+    writeln!(stdin, r#"{{"id":"s2","type":"shutdown"}}"#).unwrap();
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
+    server.join().unwrap();
 }

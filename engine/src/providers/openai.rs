@@ -12,6 +12,7 @@ use crate::protocol::{EngineError, Usage};
 #[derive(Clone)]
 pub struct CancelToken {
     cancelled: Arc<AtomicBool>,
+    terminal_sent: Arc<AtomicBool>,
     agent: ureq::Agent,
 }
 
@@ -22,6 +23,7 @@ impl CancelToken {
             .build();
         Self {
             cancelled: Arc::new(AtomicBool::new(false)),
+            terminal_sent: Arc::new(AtomicBool::new(false)),
             agent: ureq::Agent::new_with_config(cfg),
         }
     }
@@ -33,6 +35,10 @@ impl CancelToken {
 
     pub fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::SeqCst)
+    }
+
+    pub fn claim_terminal(&self) -> bool {
+        !self.terminal_sent.swap(true, Ordering::SeqCst)
     }
 }
 

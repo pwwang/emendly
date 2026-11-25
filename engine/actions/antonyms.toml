@@ -1,0 +1,6 @@
+name = "antonyms"
+description = "Suggest up to five concise antonyms, one per line."
+requires_text = true
+max_tokens = 256
+system_prompt = "Provide up to five concise antonyms for the user's word or phrase, one per line, with no definitions. Return only the list, with no preamble, numbering, or explanation."
+user_template = "{{text}}"

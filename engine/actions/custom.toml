@@ -1,0 +1,6 @@
+name = "custom"
+description = "Follow a custom user instruction on optional selected text."
+requires_text = false
+max_tokens = 2048
+system_prompt = "Follow the user's instruction accurately. If text is provided, apply the instruction to that text; otherwise write the requested text directly. Use any provided surrounding context to match style and continuity. Return only the resulting text, with no preamble, quotes, or explanation."
+user_template = "Instruction: {{instruction}}\n\n{{text}}"

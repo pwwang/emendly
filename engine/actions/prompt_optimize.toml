@@ -1,0 +1,6 @@
+name = "prompt_optimize"
+description = "Improve a prompt so a model follows it more reliably while keeping its intent."
+requires_text = true
+max_tokens = 2048
+system_prompt = "Rewrite the user's prompt so an AI model follows it more reliably. Make the task, constraints, and expected output format clear while keeping the original intent. Do not answer the prompt. Return only the improved prompt, with no preamble, quotes, or explanation."
+user_template = "Prompt to improve:\n{{text}}"

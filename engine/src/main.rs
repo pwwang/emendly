@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::env;
 use std::fs::OpenOptions;
 use std::io::{self, BufRead, BufWriter, Write};
@@ -10,8 +10,8 @@ use std::time::Instant;
 use emendly_engine::actions::ActionRegistry;
 use emendly_engine::config::{read_api_key, Config, LoggingConfig};
 use emendly_engine::protocol::{
-    parse_request, EngineError, Event, EventKind, Request, RequestKind, Usage, ENGINE_VERSION,
-    PROTOCOL_VERSION,
+    parse_request, ActionOptions, EngineError, Event, EventKind, Request, RequestKind, Usage,
+    ENGINE_VERSION, PROTOCOL_VERSION,
 };
 use emendly_engine::providers::openai::{stream_chat, CancelToken};
 
@@ -19,15 +19,15 @@ struct EngineState {
     config: Config,
     registry: Arc<ActionRegistry>,
     active: Arc<Mutex<HashMap<String, CancelToken>>>,
-    workers: Vec<thread::JoinHandle<()>>,
-    tx: mpsc::Sender<Event>,
+    workers: Vec<(CancelToken, thread::JoinHandle<()>)>,
+    tx: mpsc::Sender<Option<Event>>,
 }
 
 struct RunInput {
     id: String,
     action: String,
     text: String,
-    options: BTreeMap<String, serde_json::Value>,
+    options: ActionOptions,
     context: Option<String>,
     app: Option<String>,
     stream: bool,
@@ -56,7 +56,7 @@ fn main() -> ExitCode {
         }
     };
 
-    let (tx, rx) = mpsc::channel::<Event>();
+    let (tx, rx) = mpsc::channel::<Option<Event>>();
     let writer = spawn_writer(rx);
     let mut state = EngineState {
         config,
@@ -67,9 +67,12 @@ fn main() -> ExitCode {
     };
 
     run_stdin_loop(&mut state, once);
-    for h in state.workers {
-        let _ = h.join();
+    for (cancel, h) in state.workers {
+        if !cancel.is_cancelled() {
+            let _ = h.join();
+        }
     }
+    let _ = state.tx.send(None);
     drop(state.tx);
 
     match writer.join() {
@@ -92,11 +95,11 @@ fn parse_args() -> Result<bool, String> {
     Ok(once)
 }
 
-fn spawn_writer(rx: mpsc::Receiver<Event>) -> thread::JoinHandle<io::Result<()>> {
+fn spawn_writer(rx: mpsc::Receiver<Option<Event>>) -> thread::JoinHandle<io::Result<()>> {
     thread::spawn(move || {
         let stdout = io::stdout();
         let mut out = BufWriter::new(stdout.lock());
-        for event in rx {
+        while let Ok(Some(event)) = rx.recv() {
             serde_json::to_writer(&mut out, &event).map_err(io::Error::other)?;
             out.write_all(b"\n")?;
             out.flush()?;
@@ -114,7 +117,7 @@ fn run_stdin_loop(state: &mut EngineState, once: bool) {
         let stop = match parse_request(&line) {
             Ok(req) => dispatch_request(state, req),
             Err((id, err)) => {
-                let _ = state.tx.send(err.to_event(id));
+                let _ = state.tx.send(Some(err.to_event(id)));
                 false
             }
         };
@@ -128,29 +131,29 @@ fn run_stdin_loop(state: &mut EngineState, once: bool) {
 fn dispatch_request(state: &mut EngineState, req: Request) -> bool {
     match req.kind {
         RequestKind::Health => {
-            let _ = state.tx.send(Event::new(
+            let _ = state.tx.send(Some(Event::new(
                 req.id,
                 EventKind::Health {
                     version: ENGINE_VERSION.into(),
                     protocol: PROTOCOL_VERSION,
                 },
-            ));
+            )));
         }
         RequestKind::ActionsList => {
-            let _ = state.tx.send(Event::new(
+            let _ = state.tx.send(Some(Event::new(
                 req.id,
                 EventKind::Actions {
                     actions: state.registry.list(),
                 },
-            ));
+            )));
         }
         RequestKind::ConfigGet => {
-            let _ = state.tx.send(Event::new(
+            let _ = state.tx.send(Some(Event::new(
                 req.id,
                 EventKind::Config {
                     config: state.config.clone(),
                 },
-            ));
+            )));
         }
         RequestKind::ConfigSet { patch } => {
             let ev = match state.config.apply_patch(&patch) {
@@ -162,18 +165,21 @@ fn dispatch_request(state: &mut EngineState, req: Request) -> bool {
                 ),
                 Err(e) => e.to_event(req.id),
             };
-            let _ = state.tx.send(ev);
+            let _ = state.tx.send(Some(ev));
         }
         RequestKind::Cancel { target } => {
-            let found = state
+            let token = state
                 .active
                 .lock()
                 .ok()
-                .and_then(|mut map| map.remove(&target))
-                .map(|t| t.cancel())
-                .is_some();
-            if !found {
-                let _ = state.tx.send(Event::new(req.id, EventKind::Cancelled));
+                .and_then(|mut map| map.remove(&target));
+            if let Some(t) = token {
+                t.cancel();
+                if t.claim_terminal() {
+                    let _ = state.tx.send(Some(Event::new(target, EventKind::Cancelled)));
+                }
+            } else {
+                let _ = state.tx.send(Some(Event::new(req.id, EventKind::Cancelled)));
             }
         }
         RequestKind::Shutdown => {
@@ -219,46 +225,54 @@ fn spawn_worker(state: &mut EngineState, input: RunInput) {
     let active = Arc::clone(&state.active);
     let tx = state.tx.clone();
 
-    state.workers.push(thread::spawn(move || {
-        let started_at = Instant::now();
-        let outcome = run_action(&input, &config, &registry, &cancel, &tx);
-        if let Ok(mut map) = active.lock() {
-            map.remove(&input.id);
-        }
-        let latency_ms = started_at.elapsed().as_millis() as u64;
-        match outcome {
-            Ok((text, usage)) => {
-                let _ = tx.send(Event::new(
-                    input.id,
-                    EventKind::Done {
-                        text,
-                        usage: usage.clone(),
+    let worker_cancel = cancel.clone();
+    state.workers.push((
+        cancel,
+        thread::spawn(move || {
+            let started_at = Instant::now();
+            let outcome = run_action(&input, &config, &registry, &worker_cancel, &tx);
+            if let Ok(mut map) = active.lock() {
+                map.remove(&input.id);
+            }
+            let latency_ms = started_at.elapsed().as_millis() as u64;
+            match outcome {
+                Ok((text, usage)) => {
+                    if worker_cancel.claim_terminal() {
+                        let _ = tx.send(Some(Event::new(
+                            input.id,
+                            EventKind::Done {
+                                text,
+                                usage: usage.clone(),
+                                latency_ms,
+                            },
+                        )));
+                    }
+                    log_meta(
+                        &config.logging,
+                        &input.action,
+                        input.app.as_deref(),
                         latency_ms,
-                    },
-                ));
-                log_meta(
-                    &config.logging,
-                    &input.action,
-                    input.app.as_deref(),
-                    latency_ms,
-                    &usage,
-                    "ok",
-                );
+                        &usage,
+                        "ok",
+                    );
+                }
+                Err(err) => {
+                    let status = format!("{:?}", err.code());
+                    if worker_cancel.claim_terminal() {
+                        let _ = tx.send(Some(err.to_event(input.id)));
+                    }
+                    log_meta(
+                        &config.logging,
+                        &input.action,
+                        input.app.as_deref(),
+                        latency_ms,
+                        &Usage::default(),
+                        &status,
+                    );
+                }
             }
-            Err(err) => {
-                let status = format!("{:?}", err.code());
-                let _ = tx.send(err.to_event(input.id));
-                log_meta(
-                    &config.logging,
-                    &input.action,
-                    input.app.as_deref(),
-                    latency_ms,
-                    &Usage::default(),
-                    &status,
-                );
-            }
-        }
-    }));
+        }),
+    ));
 }
 
 fn run_action(
@@ -266,7 +280,7 @@ fn run_action(
     config: &Config,
     registry: &ActionRegistry,
     cancel: &CancelToken,
-    tx: &mpsc::Sender<Event>,
+    tx: &mpsc::Sender<Option<Event>>,
 ) -> Result<(String, Usage), EngineError> {
     let prompt = registry.render(
         &input.action,
@@ -280,17 +294,17 @@ fn run_action(
         return Err(EngineError::Cancelled);
     }
 
-    let _ = tx.send(Event::new(
+    let _ = tx.send(Some(Event::new(
         input.id.clone(),
         EventKind::Started {
             action: input.action.clone(),
             model: config.provider.model.clone(),
         },
-    ));
+    )));
 
     let res = stream_chat(&config.provider, &api_key, &prompt, cancel, |text| {
-        if input.stream {
-            let _ = tx.send(Event::new(input.id.clone(), EventKind::Delta { text }));
+        if input.stream && !cancel.is_cancelled() {
+            let _ = tx.send(Some(Event::new(input.id.clone(), EventKind::Delta { text })));
         }
     })?;
     Ok((res.text, res.usage))
@@ -333,11 +347,11 @@ fn log_meta(
     }
 }
 
-fn reap_finished(workers: &mut Vec<thread::JoinHandle<()>>) {
+fn reap_finished(workers: &mut Vec<(CancelToken, thread::JoinHandle<()>)>) {
     let mut i = 0;
     while i < workers.len() {
-        if workers[i].is_finished() {
-            let _ = workers.swap_remove(i).join();
+        if workers[i].1.is_finished() {
+            let _ = workers.swap_remove(i).1.join();
         } else {
             i += 1;
         }

@@ -1,0 +1,6 @@
+name = "humanize"
+description = "Rewrite text so it reads as natural human writing while keeping its meaning."
+requires_text = true
+max_tokens = 2048
+system_prompt = "Rewrite the user's text so it reads as natural human writing. Vary sentence rhythm, drop stock or overly formal phrasing, and keep the original meaning and formatting. Return only the rewritten text, with no preamble, quotes, or explanation."
+user_template = "{{text}}"
