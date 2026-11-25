@@ -96,6 +96,7 @@ public partial class PanelWindow : Window
     private bool _applying;
     private bool _closing;
     private bool _focusConfirmed;
+    private bool _activationNoticeShown;
 
     public event EventHandler? PasteCompleted;
 
@@ -284,10 +285,13 @@ public partial class PanelWindow : Window
 
         ShellLogger.LogMeta("focus", _targetWindow.ProcessName, "failed");
         _focusConfirmed = false;
-        _closing = true;
-        Hide();
-        Close();
-        ActivationFailed?.Invoke(this, EventArgs.Empty);
+        _closing = false;
+
+        if (!_activationNoticeShown)
+        {
+            _activationNoticeShown = true;
+            ActivationFailed?.Invoke(this, EventArgs.Empty);
+        }
     }
 
     public void CancelActiveRequest()
@@ -2220,20 +2224,16 @@ public partial class PanelWindow : Window
 
     private void OnWindowDeactivated(object? sender, EventArgs e)
     {
-        if (_closing || _applying || _languageDropdownOpen || LanguageDropdown.IsDropDownOpen)
+        // Losing focus must not dismiss the panel or cancel a running request.
+        // The panel is closed only by Esc, the close icon, the hotkey toggle or Apply.
+        if (_focusConfirmed || _activationNoticeShown)
         {
             return;
         }
 
-        CancelActiveRequest();
-        var hadFocus = _focusConfirmed;
-        _closing = true;
-        Close();
-
-        if (!hadFocus)
-        {
-            ActivationFailed?.Invoke(this, EventArgs.Empty);
-        }
+        // The panel never managed to take the keyboard; say so once, but stay open.
+        _activationNoticeShown = true;
+        ActivationFailed?.Invoke(this, EventArgs.Empty);
     }
 
     private void OnWindowSizeChanged(object sender, SizeChangedEventArgs e)

@@ -288,7 +288,7 @@ public partial class App : Application
         };
         panel.ActivationFailed += (_, _) => ShowNotice(
             targetWindow.ProcessName,
-            "Emendly could not take keyboard focus, so the panel was closed. Close any pop-ups and try again.",
+            "Emendly is open but could not take keyboard focus. Click the panel to type, or press Esc to close it.",
             snapshot.CaretLocation);
         panel.Closed += (_, _) =>
         {
