@@ -23,6 +23,7 @@ public partial class App : Application
     private ITransformer? _transformer;
     private HotkeyWindow? _hotkeyWindow;
     private Forms.NotifyIcon? _trayIcon;
+    private static System.IO.MemoryStream? _trayIconStream;
     private Forms.ToolStripMenuItem? _undoMenuItem;
     private Drawing.Icon? _ownedTrayIcon;
     private PanelWindow? _activePanel;
@@ -482,25 +483,26 @@ public partial class App : Application
     {
         try
         {
-            using var bitmap = new Drawing.Bitmap(16, 16);
-            using (var g = Drawing.Graphics.FromImage(bitmap))
+            var file = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "emendly.ico");
+            if (System.IO.File.Exists(file))
             {
-                g.Clear(Drawing.Color.FromArgb(0x25, 0x63, 0xEB));
-                using var font = new Drawing.Font("Segoe UI", 9f, Drawing.FontStyle.Bold, Drawing.GraphicsUnit.Point);
-                using var brush = new Drawing.SolidBrush(Drawing.Color.White);
-                g.DrawString("E", font, brush, 2.5f, 0.5f);
+                return new Drawing.Icon(file, new Drawing.Size(16, 16));
             }
 
-            var hIcon = bitmap.GetHicon();
-            try
+            var resource = System.Windows.Application.GetResourceStream(
+                new Uri("pack://application:,,,/Assets/emendly.ico"));
+            if (resource?.Stream is null)
             {
-                using var temp = Drawing.Icon.FromHandle(hIcon);
-                return (Drawing.Icon)temp.Clone();
+                return null;
             }
-            finally
-            {
-                _ = DestroyIcon(hIcon);
-            }
+
+            // The Icon keeps reading from its stream, so it must stay alive for the
+            // lifetime of the icon rather than being disposed here.
+            _trayIconStream?.Dispose();
+            _trayIconStream = new System.IO.MemoryStream();
+            resource.Stream.CopyTo(_trayIconStream);
+            _trayIconStream.Position = 0;
+            return new Drawing.Icon(_trayIconStream, new Drawing.Size(16, 16));
         }
         catch (Exception)
         {

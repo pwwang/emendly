@@ -9,10 +9,20 @@
     <Nullable>enable</Nullable>
     <AssemblyName>Emendly.App</AssemblyName>
     <RootNamespace>Emendly.App</RootNamespace>
+    <ApplicationIcon>Assets\emendly.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Emendly.Capture\Emendly.Capture.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\emendly.ico" />
+    <Content Include="Assets\emendly.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Resource Include="Assets\emendly-32.png" />
+    <Resource Include="Assets\emendly-256.png" />
   </ItemGroup>
 
   <ItemGroup>
