@@ -10,6 +10,8 @@
         Background="Transparent"
         ResizeMode="NoResize"
         Topmost="True"
+        ShowActivated="True"
+        Focusable="True"
         ShowInTaskbar="False"
         PreviewKeyDown="OnWindowPreviewKeyDown"
         Deactivated="OnWindowDeactivated"
@@ -58,7 +60,7 @@
 
       <!-- Action picker (Selection mode) -->
       <StackPanel x:Name="ActionPanel" Visibility="Collapsed">
-        <StackPanel x:Name="ActionListPanel" />
+        <StackPanel x:Name="ActionListPanel" Focusable="True" />
         <TextBlock Text="1-5 or Up/Down + Enter · Esc closes"
                    Foreground="#6B7280"
                    FontSize="11"

@@ -215,6 +215,18 @@ public static class ShellLogger
         Append(record);
     }
 
+    public static void LogFocus(string targetProcess)
+    {
+        var record = JsonSerializer.Serialize(new
+        {
+            ts = DateTimeOffset.UtcNow.ToString("O"),
+            @event = "focus",
+            target = targetProcess,
+        });
+
+        Append(record);
+    }
+
     public static void LogNote(string eventName, string message)
     {
         var record = JsonSerializer.Serialize(new

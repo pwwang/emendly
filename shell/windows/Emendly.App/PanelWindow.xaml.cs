@@ -50,6 +50,7 @@ public partial class PanelWindow : Window
     private static readonly Brush DescText = new SolidColorBrush(Color.FromRgb(0x9C, 0xA3, 0xAF));
 
     private readonly WindowInfo _targetWindow;
+    private readonly IntPtr _targetHwnd;
     private readonly PanelMode _mode;
     private readonly string _selectedText;
     private readonly string _fieldContext;
@@ -65,10 +66,11 @@ public partial class PanelWindow : Window
     private CancellationTokenSource? _requestCts;
     private bool _applying;
     private bool _closing;
+    private bool _focusConfirmed;
 
     public event EventHandler? PasteCompleted;
 
-    public bool IsRequestRunning => _stage == PanelStage.Streaming && _requestCts is not null;
+    public event EventHandler? ActivationFailed;
 
     public PanelWindow(
         WindowInfo targetWindow,
@@ -82,6 +84,7 @@ public partial class PanelWindow : Window
         InitializeComponent();
 
         _targetWindow = targetWindow;
+        _targetHwnd = targetWindow.Hwnd;
         _mode = mode;
         _selectedText = selectedText;
         _fieldContext = fieldContext;
@@ -118,7 +121,27 @@ public partial class PanelWindow : Window
 
     public void ShowAndActivate()
     {
-        Show();
+        if (_closing)
+        {
+            return;
+        }
+
+        if (!IsVisible)
+        {
+            Show();
+        }
+
+        TakeKeyboardFocus();
+        _ = ConfirmKeyboardFocusAsync();
+    }
+
+    private void TakeKeyboardFocus()
+    {
+        if (_closing || !IsVisible)
+        {
+            return;
+        }
+
         var helper = new WindowInteropHelper(this);
         if (helper.Handle != IntPtr.Zero)
         {
@@ -126,15 +149,76 @@ public partial class PanelWindow : Window
         }
 
         Activate();
-        if (_stage == PanelStage.ComposePrompt)
+        Focus();
+        FocusStageTarget();
+    }
+
+    private void FocusStageTarget()
+    {
+        switch (_stage)
         {
-            BriefBox.Focus();
-            Keyboard.Focus(BriefBox);
+            case PanelStage.ComposePrompt:
+                BriefBox.Focus();
+                Keyboard.Focus(BriefBox);
+                break;
+
+            case PanelStage.ChooseAction:
+                ActionListPanel.Focus();
+                Keyboard.Focus(ActionListPanel);
+                break;
+
+            case PanelStage.Streaming:
+            case PanelStage.PreviewReady:
+            case PanelStage.ErrorOrCancelled:
+                PreviewBox.Focus();
+                Keyboard.Focus(PreviewBox);
+                break;
+
+            default:
+                Keyboard.Focus(this);
+                break;
         }
-        else
+    }
+
+    private async Task ConfirmKeyboardFocusAsync()
+    {
+        // Show() only requests activation. A hotkey-triggered window may be denied
+        // foreground for a few hundred milliseconds, so check and retry twice.
+        const int checkDelayMs = 150;
+        const int maxChecks = 3;
+
+        for (var check = 0; check < maxChecks; check++)
         {
-            Focus();
+            await Task.Delay(checkDelayMs);
+
+            if (_closing || !IsVisible)
+            {
+                return;
+            }
+
+            if (IsKeyboardFocusWithin)
+            {
+                if (!_focusConfirmed)
+                {
+                    _focusConfirmed = true;
+                    ShellLogger.LogFocus(_targetWindow.ProcessName);
+                }
+
+                return;
+            }
+
+            if (check + 1 < maxChecks)
+            {
+                TakeKeyboardFocus();
+            }
         }
+
+        ShellLogger.LogMeta("focus", _targetWindow.ProcessName, "failed");
+        _focusConfirmed = false;
+        _closing = true;
+        Hide();
+        Close();
+        ActivationFailed?.Invoke(this, EventArgs.Empty);
     }
 
     public void CancelActiveRequest()
@@ -241,14 +325,6 @@ public partial class PanelWindow : Window
 
         switch (stage)
         {
-            case PanelStage.ComposePrompt:
-                _ = Dispatcher.InvokeAsync(() =>
-                {
-                    BriefBox.Focus();
-                    Keyboard.Focus(BriefBox);
-                });
-                break;
-
             case PanelStage.Streaming:
                 ErrorText.Visibility = Visibility.Collapsed;
                 PreviewStatusText.Text = "Generating...";
@@ -275,6 +351,14 @@ public partial class PanelWindow : Window
                 SecondaryButton.Visibility = Visibility.Visible;
                 break;
         }
+
+        _ = Dispatcher.InvokeAsync(() =>
+        {
+            if (!_closing && _stage == stage && IsVisible)
+            {
+                FocusStageTarget();
+            }
+        });
     }
 
     private void TriggerAction(int index)
@@ -341,6 +425,7 @@ public partial class PanelWindow : Window
             Options: options);
 
         var sw = Stopwatch.StartNew();
+        var streamedText = new StringBuilder();
 
         try
         {
@@ -349,6 +434,7 @@ public partial class PanelWindow : Window
                     request,
                     delta =>
                     {
+                        streamedText.Append(delta);
                         _ = Dispatcher.InvokeAsync(() =>
                         {
                             if (_stage == PanelStage.Streaming && ReferenceEquals(_requestCts, cts))
@@ -367,7 +453,15 @@ public partial class PanelWindow : Window
                 return;
             }
 
-            _resultText = !string.IsNullOrEmpty(result.Text) ? result.Text : PreviewBox.Text;
+            // The done payload is authoritative; accumulated deltas are the fallback when
+            // the engine omits done.text. Never reuse the request text here.
+            var doneText = !string.IsNullOrEmpty(result.Text) ? result.Text : streamedText.ToString();
+            if (string.IsNullOrEmpty(doneText))
+            {
+                doneText = PreviewBox.Text;
+            }
+
+            _resultText = doneText;
             PreviewBox.Text = _resultText;
             PreviewBox.ScrollToHome();
 
@@ -431,9 +525,9 @@ public partial class PanelWindow : Window
         }
     }
 
-    private async Task ApplyResultAsync()
+    private async Task ApplyResultAsync(string text)
     {
-        if (_applying || string.IsNullOrEmpty(_resultText))
+        if (_applying || string.IsNullOrEmpty(text))
         {
             return;
         }
@@ -445,10 +539,10 @@ public partial class PanelWindow : Window
         try
         {
             var pasted = await _inserter.PasteAsync(
-                targetHwnd: _targetWindow.Hwnd,
+                targetHwnd: _targetHwnd,
                 processName: _targetWindow.ProcessName,
                 actionName: _activeAction,
-                textToInsert: _resultText,
+                textToInsert: text,
                 replacedText: _mode == PanelMode.Selection ? _selectedText : string.Empty,
                 wasSelection: _mode == PanelMode.Selection);
 
@@ -458,12 +552,19 @@ public partial class PanelWindow : Window
                 _targetWindow.ProcessName,
                 sw.ElapsedMilliseconds,
                 Encoding.UTF8.GetByteCount(_selectedText),
-                Encoding.UTF8.GetByteCount(_resultText),
+                Encoding.UTF8.GetByteCount(text),
                 pasted ? "ok" : "failed");
 
             if (pasted)
             {
                 PasteCompleted?.Invoke(this, EventArgs.Empty);
+            }
+            else
+            {
+                NoticeWindow.ShowNotice(
+                    _targetWindow.ProcessName,
+                    "Could not confirm focus returned to the target window, so nothing was pasted.",
+                    _caretLocation);
             }
         }
         catch (Exception)
@@ -473,8 +574,11 @@ public partial class PanelWindow : Window
         }
         finally
         {
-            _closing = true;
-            Close();
+            if (!_closing)
+            {
+                _closing = true;
+                Close();
+            }
         }
     }
 
@@ -488,7 +592,7 @@ public partial class PanelWindow : Window
         CancelActiveRequest();
         _closing = true;
         Hide();
-        _ = WindowEnumerator.RestoreForeground(_targetWindow.Hwnd);
+        _ = WindowEnumerator.RestoreForeground(_targetHwnd);
         Close();
     }
 
@@ -516,7 +620,7 @@ public partial class PanelWindow : Window
                 if (e.Key == Key.Enter)
                 {
                     e.Handled = true;
-                    _ = ApplyResultAsync();
+                    _ = ApplyResultAsync(_resultText);
                 }
                 else if (e.Key == Key.Escape)
                 {
@@ -618,7 +722,7 @@ public partial class PanelWindow : Window
     {
         if (_stage == PanelStage.PreviewReady)
         {
-            _ = ApplyResultAsync();
+            _ = ApplyResultAsync(_resultText);
         }
         else if (_stage == PanelStage.ErrorOrCancelled)
         {
@@ -646,8 +750,14 @@ public partial class PanelWindow : Window
         }
 
         CancelActiveRequest();
+        var hadFocus = _focusConfirmed;
         _closing = true;
         Close();
+
+        if (!hadFocus)
+        {
+            ActivationFailed?.Invoke(this, EventArgs.Empty);
+        }
     }
 
     private void OnWindowSizeChanged(object sender, SizeChangedEventArgs e)

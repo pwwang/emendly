@@ -24,6 +24,8 @@ public sealed class ClipboardInserter
     private const int ClipboardRetryCount = 12;
     private const int ClipboardRetryDelayMs = 15;
     private const int FocusSettleDelayMs = 60;
+    private const int ForegroundPollIntervalMs = 20;
+    private const int ForegroundWaitTimeoutMs = 300;
     private const int PasteConsumeDelayMs = 150;
 
     [StructLayout(LayoutKind.Sequential)]
@@ -102,12 +104,21 @@ public sealed class ClipboardInserter
         {
             await SetClipboardTextAsync(textToInsert).ConfigureAwait(true);
 
-            if (!WindowEnumerator.RestoreForeground(targetHwnd))
+            // SetForegroundWindow can be refused while another process holds the foreground
+            // lock, so ask and then wait for the change instead of trusting the return value.
+            _ = WindowEnumerator.RestoreForeground(targetHwnd);
+            if (!await WaitForForegroundAsync(targetHwnd, cancellationToken).ConfigureAwait(true))
             {
                 return false;
             }
 
             await Task.Delay(FocusSettleDelayMs, cancellationToken).ConfigureAwait(true);
+
+            // Never send Ctrl+V unless the target still owns the foreground.
+            if (WindowEnumerator.GetForegroundWindow() != targetHwnd)
+            {
+                return false;
+            }
 
             if (!SendCtrlChord(VkV))
             {
@@ -129,6 +140,25 @@ public sealed class ClipboardInserter
         finally
         {
             await RestoreClipboardSnapshotAsync(snapshot).ConfigureAwait(true);
+        }
+    }
+
+    private static async Task<bool> WaitForForegroundAsync(IntPtr targetHwnd, CancellationToken cancellationToken)
+    {
+        var deadline = Environment.TickCount64 + ForegroundWaitTimeoutMs;
+        while (true)
+        {
+            if (WindowEnumerator.GetForegroundWindow() == targetHwnd)
+            {
+                return true;
+            }
+
+            if (Environment.TickCount64 >= deadline)
+            {
+                return false;
+            }
+
+            await Task.Delay(ForegroundPollIntervalMs, cancellationToken).ConfigureAwait(true);
         }
     }
 

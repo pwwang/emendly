@@ -129,9 +129,12 @@ public partial class App : Application
 
     private async Task HandleHotkeyAsync()
     {
-        if (_activePanel is { IsRequestRunning: true })
+        // The open panel owns the keyboard: a second hotkey cancels and dismisses it
+        // rather than stacking another panel.
+        if (_activePanel is not null)
         {
             _activePanel.CancelActiveRequest();
+            _activePanel.CloseAndRestoreFocus();
             return;
         }
 
@@ -149,11 +152,6 @@ public partial class App : Application
 
         if (foreground.Pid == (uint)Environment.ProcessId)
         {
-            if (_activePanel is not null)
-            {
-                _activePanel.CloseAndRestoreFocus();
-            }
-
             return;
         }
 
@@ -233,6 +231,10 @@ public partial class App : Application
             inserter: _inserter);
 
         panel.PasteCompleted += (_, _) => UpdateUndoMenuItem();
+        panel.ActivationFailed += (_, _) => ShowNotice(
+            targetWindow.ProcessName,
+            "Emendly could not take keyboard focus, so the panel was closed. Close any pop-ups and try again.",
+            snapshot.CaretLocation);
         panel.Closed += (_, _) =>
         {
             if (ReferenceEquals(_activePanel, panel))
