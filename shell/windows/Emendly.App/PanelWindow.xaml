@@ -3,7 +3,10 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Emendly"
         Width="380"
-        Height="420"
+        SizeToContent="Height"
+        MaxHeight="420"
+        MinHeight="140"
+        WindowStartupLocation="Manual"
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
@@ -59,6 +62,36 @@
       </Style.Triggers>
     </Style>
 
+        <Style x:Key="PanelScrollBarStyle" TargetType="ScrollBar">
+      <Setter Property="Width" Value="10" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ScrollBar">
+            <Grid Background="Transparent">
+              <Track x:Name="PART_Track" IsDirectionReversed="True">
+                <Track.DecreaseRepeatButton>
+                  <RepeatButton Command="ScrollBar.PageUpCommand" Opacity="0" Focusable="False" />
+                </Track.DecreaseRepeatButton>
+                <Track.Thumb>
+                  <Thumb>
+                    <Thumb.Template>
+                      <ControlTemplate TargetType="Thumb">
+                        <Border Background="#3A3F4E" CornerRadius="5" Margin="2,4" />
+                      </ControlTemplate>
+                    </Thumb.Template>
+                  </Thumb>
+                </Track.Thumb>
+                <Track.IncreaseRepeatButton>
+                  <RepeatButton Command="ScrollBar.PageDownCommand" Opacity="0" Focusable="False" />
+                </Track.IncreaseRepeatButton>
+              </Track>
+            </Grid>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
     <Style x:Key="OptionIconButtonStyle" TargetType="Button">
       <Setter Property="Width" Value="18" />
       <Setter Property="Height" Value="18" />
@@ -105,6 +138,7 @@
         </Trigger>
       </Style.Triggers>
     </Style>
+    <Style TargetType="ScrollBar" BasedOn="{StaticResource PanelScrollBarStyle}" />
 
     <Style x:Key="EditableInputBoxStyle" TargetType="TextBox">
       <Setter Property="Background" Value="#1B1B22" />
@@ -291,7 +325,7 @@
             </Grid>
           </Border>
 
-          <!-- Item list (fixed flex slot inside fixed-height window) -->
+          <!-- Item list (flex slot; scrolls only when the expanded menu exceeds MaxHeight) -->
           <ScrollViewer x:Name="ActionScrollViewer"
                         Grid.Row="1"
                         VerticalScrollBarVisibility="Auto"

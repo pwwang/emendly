@@ -35,6 +35,7 @@ public partial class PanelWindow : Window
         MenuAction Action);
 
     private const int MaxSelectionCharacters = 4000;
+    private const double FullStageMinHeight = 420;
 
     private static readonly Brush RowNormalBg = Brushes.Transparent;
     private static readonly Brush RowSelectedBg = new SolidColorBrush(Color.FromRgb(0x2A, 0x33, 0x47));
@@ -57,6 +58,7 @@ public partial class PanelWindow : Window
     private readonly AppSettings _settings;
     private readonly ITransformer _transformer;
     private readonly ClipboardInserter _inserter;
+    private readonly double _menuMinHeight;
     private readonly List<MenuAction> _visibleActions = new();
     private readonly List<ActionRowElements> _actionRows = new();
 
@@ -100,6 +102,7 @@ public partial class PanelWindow : Window
     {
         InitializeComponent();
 
+        _menuMinHeight = MinHeight;
         _targetWindow = targetWindow;
         _targetHwnd = targetWindow.Hwnd;
         _strategyName = strategyName;
@@ -294,6 +297,11 @@ public partial class PanelWindow : Window
     {
         _stage = stage;
 
+        MinHeight = stage is PanelStage.PromptInput or PanelStage.Streaming
+            or PanelStage.PreviewReady or PanelStage.ErrorOrCancelled
+            ? FullStageMinHeight
+            : _menuMinHeight;
+
         UnsupportedPanel.Visibility = stage == PanelStage.Unsupported ? Visibility.Visible : Visibility.Collapsed;
         MenuPanel.Visibility = stage == PanelStage.ChooseAction ? Visibility.Visible : Visibility.Collapsed;
         PromptPanel.Visibility = stage == PanelStage.PromptInput ? Visibility.Visible : Visibility.Collapsed;
@@ -332,6 +340,7 @@ public partial class PanelWindow : Window
         }
 
         UpdateModeLine();
+        RefreshPanelHeight();
 
         _ = Dispatcher.InvokeAsync(() =>
         {
@@ -406,6 +415,7 @@ public partial class PanelWindow : Window
             ? (_filter.Length == 0 ? "expanded" : "filtered")
             : StateLabelLower(_classification.State);
         ShellLogger.LogMenu(state, _visibleActions.Count);
+        RefreshPanelHeight();
     }
 
     private void AddGroupHeader(string label)
@@ -1035,6 +1045,7 @@ public partial class PanelWindow : Window
         _updatingLanguageList = false;
 
         PopulateLanguages(string.Empty);
+        RefreshPanelHeight();
 
         _ = Dispatcher.InvokeAsync(() =>
         {
@@ -1050,6 +1061,7 @@ public partial class PanelWindow : Window
     {
         _languagePickerOpen = false;
         LanguagePickerOverlay.Visibility = Visibility.Collapsed;
+        RefreshPanelHeight();
 
         if (restoreFocus)
         {
@@ -2269,6 +2281,34 @@ public partial class PanelWindow : Window
 
         Left = Math.Clamp(desiredLeft, workLeft + 4, Math.Max(workLeft + 4, workRight - panelWidth - 4));
         Top = Math.Clamp(desiredTop, workTop + 4, Math.Max(workTop + 4, workBottom - estimatedHeight - 4));
+    }
+
+    private void RefreshPanelHeight()
+    {
+        if (_closing || !IsVisible)
+        {
+            return;
+        }
+
+        var anchorLeft = Left;
+        var anchorTop = Top;
+
+        // SizeToContent measures against the current window once it has been
+        // clamped, so a shorter list would keep the taller height. Re-arm the
+        // mode so it measures the new content against infinite height again.
+        SizeToContent = SizeToContent.Manual;
+        SizeToContent = SizeToContent.Height;
+        UpdateLayout();
+
+        if (!double.IsNaN(anchorLeft))
+        {
+            Left = anchorLeft;
+        }
+
+        if (!double.IsNaN(anchorTop))
+        {
+            Top = anchorTop;
+        }
     }
 
     private void ClampWithinMonitor()
