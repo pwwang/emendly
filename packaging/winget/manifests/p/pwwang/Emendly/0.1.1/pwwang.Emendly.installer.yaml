@@ -13,11 +13,10 @@ InstallerSwitches:
   Silent: /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
   SilentWithProgress: /SILENT /SUPPRESSMSGBOXES /NORESTART
 UpgradeBehavior: install
-ReleaseDate: 2026-11-25
+ReleaseDate: 2026-11-26
 Installers:
   - Architecture: x64
     InstallerUrl: https://github.com/pwwang/emendly/releases/download/v0.1.1/Emendly-v0.1.1-win-x64-setup.exe
-    # PLACEHOLDER: replace with the actual SHA-256 of the released setup exe using packaging/winget/update-manifest.py
-    InstallerSha256: 0000000000000000000000000000000000000000000000000000000000000000
+    InstallerSha256: 490B63CC169540B5CA0D295D8084549962D900DCEB3E2F3809621B568E9AEC33
 ManifestType: installer
 ManifestVersion: 1.6.0
