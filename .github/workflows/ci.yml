@@ -53,6 +53,9 @@ jobs:
   macos:
     name: macOS Shell
     runs-on: macos-14
+    # macOS minutes need a paid plan for private repos; without this guard the job
+    # comes back "cancelled" with no runner and looks like a broken build.
+    if: ${{ !github.event.repository.private }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
