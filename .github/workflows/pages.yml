@@ -40,6 +40,28 @@ jobs:
         with:
           path: site
 
+      # deploy-pages reads the artifact list from the Actions API the instant it
+      # starts. The upload finalises ~80ms before it, and that API lags, so the
+      # first attempt can see "Found 0 artifact(s)" on a run that uploaded fine
+      # and then succeeds when re-run by hand. Wait until the artifact is actually
+      # listed before deploying, and retry once if it still is not.
+      - name: Wait for artifact to be listed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 20); do
+            count=$(gh api "repos/${{ github.repository }}/actions/runs/$RUN_ID/artifacts" \
+              --jq '[.artifacts[] | select(.name == "github-pages")] | length' 2>/dev/null || echo 0)
+            if [ "$count" != "0" ]; then
+              echo "github-pages artifact is listed after ${attempt} check(s)"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::warning::github-pages artifact never appeared in the artifacts API; deploying anyway"
+
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
