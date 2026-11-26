@@ -53,9 +53,12 @@ jobs:
   macos:
     name: macOS Shell
     runs-on: macos-14
-    # macOS minutes need a paid plan for private repos; without this guard the job
-    # comes back "cancelled" with no runner and looks like a broken build.
-    if: ${{ !github.event.repository.private }}
+    # macOS runners are not available on this account: the job is dispatched, gets no
+    # runner, and returns "cancelled" with zero steps, which reads as a red failure.
+    # Public or private made no difference. Gate it on a repo variable instead, so
+    # turning macOS CI on is one setting once billing is configured:
+    #   gh variable set EMENDLY_MACOS_CI --body true
+    if: ${{ vars.EMENDLY_MACOS_CI == 'true' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
