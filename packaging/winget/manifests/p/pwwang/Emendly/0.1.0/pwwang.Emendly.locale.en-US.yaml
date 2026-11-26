@@ -1,0 +1,31 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
+
+PackageIdentifier: pwwang.Emendly
+PackageVersion: 0.1.0
+PackageLocale: en-US
+Publisher: pwwang
+PublisherUrl: https://emendly.dev
+PublisherSupportUrl: https://github.com/pwwang/emendly/issues
+PrivacyUrl: https://emendly.dev/privacy.html
+Author: pwwang
+PackageName: Emendly
+PackageUrl: https://emendly.dev
+License: MIT
+LicenseUrl: https://github.com/pwwang/emendly/blob/main/LICENSE
+ShortDescription: System-wide AI writing assistant for Windows
+Description: >-
+  Emendly is a lightweight, on-demand, system-wide writing assistant for Windows.
+  Press a global hotkey in any text field to proofread, rewrite, compose, translate,
+  or find synonyms using your own OpenAI-compatible API endpoint.
+Moniker: emendly
+Tags:
+  - ai
+  - writing
+  - proofread
+  - rewrite
+  - translate
+  - productivity
+  - desktop
+ReleaseNotesUrl: https://github.com/pwwang/emendly/releases/tag/v0.1.0
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0

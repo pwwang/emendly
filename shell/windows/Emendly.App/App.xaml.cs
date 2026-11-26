@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using Emendly.App.Extensions;
 using Emendly.Capture;
 using Drawing = System.Drawing;
 using Forms = System.Windows.Forms;
@@ -29,6 +30,11 @@ public partial class App : Application
     private PanelWindow? _activePanel;
     private NoticeWindow? _activeNotice;
     private SettingsWindow? _settingsWindow;
+    private UpdateDialog? _updateDialog;
+    private UpdateCheckResult? _pendingUpdate;
+    private bool _lastBalloonWasUpdate;
+    private bool _updateCheckInFlight;
+    private CancellationTokenSource? _startupUpdateCts;
     private bool _shutdownAfterSettings;
     private bool _probeInFlight;
 
@@ -70,6 +76,7 @@ public partial class App : Application
 
         InitializeTrayIcon();
         InitializeHotkey();
+        _ = RunStartupUpdateCheckAsync();
     }
 
     private static bool HasFlag(string[] args, string flag)
@@ -119,6 +126,9 @@ public partial class App : Application
         };
         _undoMenuItem.Click += (_, _) => _ = UndoLastInsertAsync();
 
+        var checkUpdatesItem = new Forms.ToolStripMenuItem("Check for updates…");
+        checkUpdatesItem.Click += (_, _) => _ = CheckForUpdatesManuallyAsync();
+
         var quitItem = new Forms.ToolStripMenuItem("Quit");
         quitItem.Click += (_, _) => Shutdown(0);
 
@@ -126,6 +136,8 @@ public partial class App : Application
         menu.Items.Add(new Forms.ToolStripSeparator());
         menu.Items.Add(settingsItem);
         menu.Items.Add(_undoMenuItem);
+        menu.Items.Add(checkUpdatesItem);
+        ExtensionHost.ApplyTrayMenu(menu);
         menu.Items.Add(new Forms.ToolStripSeparator());
         menu.Items.Add(quitItem);
 
@@ -137,6 +149,14 @@ public partial class App : Application
             Text = BuildTrayTooltip(),
             ContextMenuStrip = menu,
             Visible = true,
+        };
+        _trayIcon.BalloonTipClicked += (_, _) =>
+        {
+            if (_lastBalloonWasUpdate && _pendingUpdate is { } pending)
+            {
+                _lastBalloonWasUpdate = false;
+                _ = Dispatcher.InvokeAsync(() => OpenUpdateDialog(pending));
+            }
         };
     }
 
@@ -486,8 +506,153 @@ public partial class App : Application
             : $"Undo last insert ({entry.ProcessName})";
     }
 
+    private async Task RunStartupUpdateCheckAsync()
+    {
+        if (!UpdateChecker.ShouldRunAutoCheck(_settings))
+        {
+            return;
+        }
+
+        _startupUpdateCts?.Dispose();
+        var cts = new CancellationTokenSource();
+        _startupUpdateCts = cts;
+
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(4), cts.Token);
+            if (!UpdateChecker.ShouldRunAutoCheck(_settings))
+            {
+                return;
+            }
+
+            var result = await UpdateChecker.CheckForUpdatesAsync(cts.Token);
+            if (result.Status == UpdateCheckStatus.Error)
+            {
+                ShellLogger.LogMeta("update.auto", "emendly", "error");
+                return;
+            }
+
+            PersistLastUpdateCheck();
+            if (result.Status == UpdateCheckStatus.UpdateAvailable)
+            {
+                ShellLogger.LogMeta("update.auto", "emendly", "available");
+                _pendingUpdate = result;
+                ShowBalloon(
+                    "Emendly",
+                    $"Emendly {result.LatestVersion} is available — click to update",
+                    Forms.ToolTipIcon.Info);
+                _lastBalloonWasUpdate = true;
+            }
+            else
+            {
+                ShellLogger.LogMeta("update.auto", "emendly", "up_to_date");
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Application is exiting.
+        }
+        catch (Exception)
+        {
+            // Never surface silent startup check errors.
+        }
+    }
+
+    private async Task CheckForUpdatesManuallyAsync()
+    {
+        if (_updateCheckInFlight)
+        {
+            return;
+        }
+
+        _updateCheckInFlight = true;
+        try
+        {
+            var result = await UpdateChecker.CheckForUpdatesAsync();
+            if (result.Status != UpdateCheckStatus.Error)
+            {
+                PersistLastUpdateCheck();
+            }
+
+            switch (result.Status)
+            {
+                case UpdateCheckStatus.UpdateAvailable:
+                    ShellLogger.LogMeta("update.manual", "emendly", "available");
+                    _pendingUpdate = result;
+                    OpenUpdateDialog(result);
+                    break;
+                case UpdateCheckStatus.UpToDate:
+                    ShellLogger.LogMeta("update.manual", "emendly", "up_to_date");
+                    MessageBox.Show(
+                        $"Emendly {result.CurrentVersion} is up to date.",
+                        "Emendly",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+                    break;
+                default:
+                    ShellLogger.LogMeta("update.manual", "emendly", "error");
+                    MessageBox.Show(
+                        result.ErrorMessage ?? "Could not check for updates.",
+                        "Emendly",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                    break;
+            }
+        }
+        finally
+        {
+            _updateCheckInFlight = false;
+        }
+    }
+
+    private void OpenUpdateDialog(UpdateCheckResult result)
+    {
+        if (_updateDialog is not null)
+        {
+            _updateDialog.Activate();
+            return;
+        }
+
+        var dialog = new UpdateDialog(result);
+        _updateDialog = dialog;
+        dialog.Closed += (_, _) =>
+        {
+            if (ReferenceEquals(_updateDialog, dialog))
+            {
+                _updateDialog = null;
+            }
+        };
+        dialog.Show();
+    }
+
+    private void CloseUpdateDialog()
+    {
+        var dialog = _updateDialog;
+        if (dialog is null)
+        {
+            return;
+        }
+
+        _updateDialog = null;
+        dialog.Close();
+    }
+
+    private void PersistLastUpdateCheck()
+    {
+        try
+        {
+            _settings.LastUpdateCheckUtc = DateTimeOffset.UtcNow;
+            _settings.Save();
+        }
+        catch (Exception)
+        {
+            // Ignore settings write errors during update check.
+        }
+    }
+
     private void ShowBalloon(string title, string text, Forms.ToolTipIcon icon)
     {
+        _lastBalloonWasUpdate = false;
         _trayIcon?.ShowBalloonTip(4500, title, text, icon);
     }
 
@@ -524,7 +689,22 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        if (_startupUpdateCts is not null)
+        {
+            try
+            {
+                _startupUpdateCts.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+
+            _startupUpdateCts.Dispose();
+            _startupUpdateCts = null;
+        }
+
         CloseNotice();
+        CloseUpdateDialog();
         _shutdownAfterSettings = false;
         CloseSettingsWindow();
 

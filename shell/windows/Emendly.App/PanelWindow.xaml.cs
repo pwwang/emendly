@@ -11,6 +11,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using System.Windows.Threading;
+using Emendly.App.Extensions;
 using Emendly.Capture;
 
 namespace Emendly.App;
@@ -1388,12 +1389,13 @@ public partial class PanelWindow : Window
 
         var sw = Stopwatch.StartNew();
         var streamedText = new StringBuilder();
+        var effectiveRequest = ExtensionHost.ApplyRequestFilters(state.Request);
 
         try
         {
             var result = await Task.Run(
                 () => _transformer.TransformAsync(
-                    state.Request,
+                    effectiveRequest,
                     delta =>
                     {
                         streamedText.Append(delta);
@@ -1436,6 +1438,12 @@ public partial class PanelWindow : Window
                 state.InputBytes,
                 Encoding.UTF8.GetByteCount(_resultText),
                 "ok");
+
+            var completedResult = string.Equals(result.Text, _resultText, StringComparison.Ordinal)
+                && result.LatencyMs == latency
+                ? result
+                : result with { Text = _resultText, LatencyMs = latency };
+            ExtensionHost.NotifyCompleted(effectiveRequest, completedResult, _targetWindow.ProcessName);
 
             _canRetry = false;
             if (_stage == PanelStage.Streaming)

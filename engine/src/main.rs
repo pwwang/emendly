@@ -147,6 +147,21 @@ fn dispatch_request(state: &mut EngineState, req: Request) -> bool {
                 },
             )));
         }
+        RequestKind::ActionsReload => {
+            let ev = match ActionRegistry::load_default() {
+                Ok(new_registry) => {
+                    state.registry = Arc::new(new_registry);
+                    Event::new(
+                        req.id,
+                        EventKind::Actions {
+                            actions: state.registry.list(),
+                        },
+                    )
+                }
+                Err(e) => e.to_event(req.id),
+            };
+            let _ = state.tx.send(Some(ev));
+        }
         RequestKind::ConfigGet => {
             let _ = state.tx.send(Some(Event::new(
                 req.id,
@@ -176,10 +191,14 @@ fn dispatch_request(state: &mut EngineState, req: Request) -> bool {
             if let Some(t) = token {
                 t.cancel();
                 if t.claim_terminal() {
-                    let _ = state.tx.send(Some(Event::new(target, EventKind::Cancelled)));
+                    let _ = state
+                        .tx
+                        .send(Some(Event::new(target, EventKind::Cancelled)));
                 }
             } else {
-                let _ = state.tx.send(Some(Event::new(req.id, EventKind::Cancelled)));
+                let _ = state
+                    .tx
+                    .send(Some(Event::new(req.id, EventKind::Cancelled)));
             }
         }
         RequestKind::Shutdown => {
@@ -304,7 +323,10 @@ fn run_action(
 
     let res = stream_chat(&config.provider, &api_key, &prompt, cancel, |text| {
         if input.stream && !cancel.is_cancelled() {
-            let _ = tx.send(Some(Event::new(input.id.clone(), EventKind::Delta { text })));
+            let _ = tx.send(Some(Event::new(
+                input.id.clone(),
+                EventKind::Delta { text },
+            )));
         }
     })?;
     Ok((res.text, res.usage))

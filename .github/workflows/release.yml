@@ -129,6 +129,98 @@ jobs:
           }
           Write-Host "Prompt templates: $count"
 
+      - name: Sign staged Windows binaries
+        shell: pwsh
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_SIGNING_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          AZURE_SIGNING_ACCOUNT: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          AZURE_SIGNING_PROFILE: ${{ secrets.AZURE_SIGNING_PROFILE }}
+          WINDOWS_SIGN_PFX_B64: ${{ secrets.WINDOWS_SIGN_PFX_B64 }}
+          WINDOWS_SIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGN_PFX_PASSWORD }}
+        run: |
+          $targets = @(
+            "stage/Emendly/Emendly.App.exe",
+            "stage/Emendly/engine/emendly-engine.exe"
+          )
+
+          $hasAzure = -not [string]::IsNullOrWhiteSpace($env:AZURE_TENANT_ID) `
+            -and -not [string]::IsNullOrWhiteSpace($env:AZURE_CLIENT_ID) `
+            -and -not [string]::IsNullOrWhiteSpace($env:AZURE_CLIENT_SECRET) `
+            -and -not [string]::IsNullOrWhiteSpace($env:AZURE_SIGNING_ENDPOINT) `
+            -and -not [string]::IsNullOrWhiteSpace($env:AZURE_SIGNING_ACCOUNT) `
+            -and -not [string]::IsNullOrWhiteSpace($env:AZURE_SIGNING_PROFILE)
+          $hasPfx = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_SIGN_PFX_B64) `
+            -and -not [string]::IsNullOrWhiteSpace($env:WINDOWS_SIGN_PFX_PASSWORD)
+
+          if (-not $hasAzure -and -not $hasPfx) {
+            Write-Host "::notice::No Windows code-signing secrets configured; shipping unsigned binaries."
+            exit 0
+          }
+
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (-not $signtool) {
+            throw "signtool.exe not found in Windows Kits"
+          }
+
+          if ($hasAzure) {
+            $toolsDir = Join-Path $env:RUNNER_TEMP "trusted-signing-client"
+            $dlib = Get-ChildItem $toolsDir -Recurse -Filter "Azure.CodeSigning.Dlib.dll" -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match 'x64' } |
+              Select-Object -First 1 -ExpandProperty FullName
+            if (-not $dlib) {
+              New-Item -ItemType Directory -Force -Path $toolsDir | Out-Null
+              $nupkg = Join-Path $toolsDir "client.zip"
+              Invoke-WebRequest -Uri "https://www.nuget.org/api/v2/package/Microsoft.Trusted.Signing.Client" -OutFile $nupkg
+              Expand-Archive -Path $nupkg -DestinationPath $toolsDir -Force
+              $dlib = Get-ChildItem $toolsDir -Recurse -Filter "Azure.CodeSigning.Dlib.dll" |
+                Where-Object { $_.FullName -match 'x64' } |
+                Select-Object -First 1 -ExpandProperty FullName
+            }
+            if (-not $dlib) {
+              throw "Azure.CodeSigning.Dlib.dll not found in Microsoft.Trusted.Signing.Client package"
+            }
+
+            $metadataPath = Join-Path $env:RUNNER_TEMP "azure-signing-metadata.json"
+            $metadata = @{
+              Endpoint = $env:AZURE_SIGNING_ENDPOINT
+              CodeSigningAccountName = $env:AZURE_SIGNING_ACCOUNT
+              CertificateProfileName = $env:AZURE_SIGNING_PROFILE
+            } | ConvertTo-Json
+            Set-Content -Path $metadataPath -Value $metadata -Encoding UTF8
+
+            try {
+              foreach ($target in $targets) {
+                & $signtool sign /v /fd SHA256 /tr http://timestamp.acs.microsoft.com /td SHA256 /dlib $dlib /dmdf $metadataPath $target
+                if ($LASTEXITCODE -ne 0) {
+                  throw "Azure Artifact Signing failed for $target (exit $LASTEXITCODE)"
+                }
+              }
+            }
+            finally {
+              Remove-Item -Force -ErrorAction SilentlyContinue $metadataPath
+            }
+          }
+          else {
+            $pfxPath = Join-Path $env:RUNNER_TEMP "emendly-sign.pfx"
+            [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:WINDOWS_SIGN_PFX_B64))
+            try {
+              foreach ($target in $targets) {
+                & $signtool sign /v /f $pfxPath /p $env:WINDOWS_SIGN_PFX_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $target
+                if ($LASTEXITCODE -ne 0) {
+                  throw "PFX code signing failed for $target (exit $LASTEXITCODE)"
+                }
+              }
+            }
+            finally {
+              Remove-Item -Force -ErrorAction SilentlyContinue $pfxPath
+            }
+          }
+
       - name: Verify bundle layout and create zip
         shell: pwsh
         run: |
@@ -200,6 +292,108 @@ jobs:
             throw "ISCC failed with exit code $LASTEXITCODE"
           }
 
+      - name: Sign Inno Setup installer
+        shell: pwsh
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_SIGNING_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          AZURE_SIGNING_ACCOUNT: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          AZURE_SIGNING_PROFILE: ${{ secrets.AZURE_SIGNING_PROFILE }}
+          WINDOWS_SIGN_PFX_B64: ${{ secrets.WINDOWS_SIGN_PFX_B64 }}
+          WINDOWS_SIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGN_PFX_PASSWORD }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $target = "dist/Emendly-$tag-win-x64-setup.exe"
+
+          $hasAzure = -not [string]::IsNullOrWhiteSpace($env:AZURE_TENANT_ID) `
+            -and -not [string]::IsNullOrWhiteSpace($env:AZURE_CLIENT_ID) `
+            -and -not [string]::IsNullOrWhiteSpace($env:AZURE_CLIENT_SECRET) `
+            -and -not [string]::IsNullOrWhiteSpace($env:AZURE_SIGNING_ENDPOINT) `
+            -and -not [string]::IsNullOrWhiteSpace($env:AZURE_SIGNING_ACCOUNT) `
+            -and -not [string]::IsNullOrWhiteSpace($env:AZURE_SIGNING_PROFILE)
+          $hasPfx = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_SIGN_PFX_B64) `
+            -and -not [string]::IsNullOrWhiteSpace($env:WINDOWS_SIGN_PFX_PASSWORD)
+
+          if (-not $hasAzure -and -not $hasPfx) {
+            Write-Host "::notice::No Windows code-signing secrets configured; shipping unsigned installer."
+            exit 0
+          }
+
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (-not $signtool) {
+            throw "signtool.exe not found in Windows Kits"
+          }
+
+          if ($hasAzure) {
+            $toolsDir = Join-Path $env:RUNNER_TEMP "trusted-signing-client"
+            $dlib = Get-ChildItem $toolsDir -Recurse -Filter "Azure.CodeSigning.Dlib.dll" -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match 'x64' } |
+              Select-Object -First 1 -ExpandProperty FullName
+            if (-not $dlib) {
+              New-Item -ItemType Directory -Force -Path $toolsDir | Out-Null
+              $nupkg = Join-Path $toolsDir "client.zip"
+              Invoke-WebRequest -Uri "https://www.nuget.org/api/v2/package/Microsoft.Trusted.Signing.Client" -OutFile $nupkg
+              Expand-Archive -Path $nupkg -DestinationPath $toolsDir -Force
+              $dlib = Get-ChildItem $toolsDir -Recurse -Filter "Azure.CodeSigning.Dlib.dll" |
+                Where-Object { $_.FullName -match 'x64' } |
+                Select-Object -First 1 -ExpandProperty FullName
+            }
+            if (-not $dlib) {
+              throw "Azure.CodeSigning.Dlib.dll not found in Microsoft.Trusted.Signing.Client package"
+            }
+
+            $metadataPath = Join-Path $env:RUNNER_TEMP "azure-signing-metadata.json"
+            $metadata = @{
+              Endpoint = $env:AZURE_SIGNING_ENDPOINT
+              CodeSigningAccountName = $env:AZURE_SIGNING_ACCOUNT
+              CertificateProfileName = $env:AZURE_SIGNING_PROFILE
+            } | ConvertTo-Json
+            Set-Content -Path $metadataPath -Value $metadata -Encoding UTF8
+
+            try {
+              & $signtool sign /v /fd SHA256 /tr http://timestamp.acs.microsoft.com /td SHA256 /dlib $dlib /dmdf $metadataPath $target
+              if ($LASTEXITCODE -ne 0) {
+                throw "Azure Artifact Signing failed for $target (exit $LASTEXITCODE)"
+              }
+            }
+            finally {
+              Remove-Item -Force -ErrorAction SilentlyContinue $metadataPath
+            }
+          }
+          else {
+            $pfxPath = Join-Path $env:RUNNER_TEMP "emendly-sign.pfx"
+            [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:WINDOWS_SIGN_PFX_B64))
+            try {
+              & $signtool sign /v /f $pfxPath /p $env:WINDOWS_SIGN_PFX_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $target
+              if ($LASTEXITCODE -ne 0) {
+                throw "PFX code signing failed for $target (exit $LASTEXITCODE)"
+              }
+            }
+            finally {
+              Remove-Item -Force -ErrorAction SilentlyContinue $pfxPath
+            }
+          }
+
+      - name: Generate SHA256SUMS.txt
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $files = @(
+            "dist/Emendly-$tag-win-x64.zip",
+            "dist/Emendly-$tag-win-x64-setup.exe"
+          )
+          $lines = foreach ($file in $files) {
+            $hash = (Get-FileHash -Path $file -Algorithm SHA256).Hash.ToLowerInvariant()
+            $name = Split-Path -Leaf $file
+            "$hash  $name"
+          }
+          Set-Content -Path "dist/SHA256SUMS.txt" -Value $lines -Encoding ASCII
+          Get-Content "dist/SHA256SUMS.txt"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -207,3 +401,4 @@ jobs:
           files: |
             dist/Emendly-${{ github.ref_name }}-win-x64.zip
             dist/Emendly-${{ github.ref_name }}-win-x64-setup.exe
+            dist/SHA256SUMS.txt

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -39,6 +40,13 @@ public sealed class AppSettings
 
     [JsonPropertyName("context_enabled")]
     public Dictionary<string, bool> ContextEnabled { get; set; } = new(StringComparer.Ordinal);
+
+    [JsonPropertyName("check_updates_on_startup")]
+    public bool CheckUpdatesOnStartup { get; set; } = true;
+
+    [JsonPropertyName("last_update_check_utc")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? LastUpdateCheckUtc { get; set; }
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -136,7 +144,36 @@ public sealed class AppSettings
                     }
                 }
             }
+
+            if (TryGetBool(root, "check_updates_on_startup", out var checkUpdatesOnStartup))
+            {
+                target.CheckUpdatesOnStartup = checkUpdatesOnStartup;
+            }
+
+            if (TryGetString(root, "last_update_check_utc", out var lastCheckRaw)
+                && !string.IsNullOrWhiteSpace(lastCheckRaw)
+                && DateTimeOffset.TryParse(
+                    lastCheckRaw,
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.RoundtripKind,
+                    out var lastCheckUtc))
+            {
+                target.LastUpdateCheckUtc = lastCheckUtc.ToUniversalTime();
+            }
         }
+    }
+
+    private static bool TryGetBool(JsonElement element, string name, out bool value)
+    {
+        if (TryGetProperty(element, name, out var property)
+            && property.ValueKind is JsonValueKind.True or JsonValueKind.False)
+        {
+            value = property.GetBoolean();
+            return true;
+        }
+
+        value = false;
+        return false;
     }
 
     private static bool TryGetString(JsonElement element, string name, out string? value)

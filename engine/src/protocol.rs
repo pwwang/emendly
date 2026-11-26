@@ -88,6 +88,15 @@ impl EngineError {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
+pub struct GlossaryEntry {
+    pub source: String,
+    pub target: Option<String>,
+    pub do_not_translate: bool,
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ActionOptions {
     pub include_context: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -104,6 +113,14 @@ pub struct ActionOptions {
     pub brief: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_prefix: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_override: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_template_override: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub glossary: Option<Vec<GlossaryEntry>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -120,6 +137,8 @@ pub enum RequestKind {
     Health,
     #[serde(rename = "actions.list")]
     ActionsList,
+    #[serde(rename = "actions.reload")]
+    ActionsReload,
     #[serde(rename = "config.get")]
     ConfigGet,
     #[serde(rename = "config.set")]
@@ -236,8 +255,8 @@ pub fn parse_request(line: &str) -> Result<Request, (String, EngineError)> {
     serde_json::from_value::<Request>(value).map_err(|_| {
         let msg = match req_type.as_deref() {
             Some(
-                "health" | "actions.list" | "config.get" | "config.set" | "actions.run" | "cancel"
-                | "shutdown",
+                "health" | "actions.list" | "actions.reload" | "config.get" | "config.set"
+                | "actions.run" | "cancel" | "shutdown",
             ) => "invalid request fields".into(),
             Some(t) => format!("unknown request type: {t}"),
             None => "missing request type".into(),
@@ -255,6 +274,7 @@ mod tests {
         let cases = [
             r#"{"id":"r1","type":"health"}"#,
             r#"{"id":"r2","type":"actions.list"}"#,
+            r#"{"id":"r2b","type":"actions.reload"}"#,
             r#"{"id":"r3","type":"config.get"}"#,
             r#"{"id":"r4","type":"config.set","patch":{"model":"gpt-5-mini"}}"#,
             r#"{"id":"r5","type":"actions.run","action":"proofread","text":"their going"}"#,
@@ -312,10 +332,9 @@ mod tests {
         assert_eq!(options.target_lang.as_deref(), Some("French"));
         assert_eq!(options.instruction.as_deref(), Some("tighten"));
 
-        let default_req = parse_request(
-            r#"{"id":"o2","type":"actions.run","action":"proofread","text":"hi"}"#,
-        )
-        .unwrap();
+        let default_req =
+            parse_request(r#"{"id":"o2","type":"actions.run","action":"proofread","text":"hi"}"#)
+                .unwrap();
         let RequestKind::ActionsRun { options, .. } = default_req.kind else {
             panic!("expected ActionsRun");
         };
@@ -324,5 +343,87 @@ mod tests {
         assert_eq!(options.context_after, None);
         assert_eq!(options.target_lang, None);
         assert_eq!(options.instruction, None);
+        assert_eq!(options.system_prefix, None);
+        assert_eq!(options.system_override, None);
+        assert_eq!(options.user_template_override, None);
+        assert_eq!(options.glossary, None);
+    }
+
+    #[test]
+    fn parses_extension_options_and_reload_request() {
+        let req = parse_request(
+            r#"{"id":"g1","type":"actions.run","action":"translate","text":"hi","options":{"system_prefix":"Prefer plain English.","system_override":"You are terse.","user_template_override":"{{text}}","glossary":[{"source":"Emendly","do_not_translate":true},{"source":"engine","target":"motor","note":"product term"},{"source":"shell","target":"casca"}]}}"#,
+        )
+        .unwrap();
+        let RequestKind::ActionsRun { options, .. } = req.kind else {
+            panic!("expected ActionsRun");
+        };
+        assert_eq!(
+            options.system_prefix.as_deref(),
+            Some("Prefer plain English.")
+        );
+        assert_eq!(options.system_override.as_deref(), Some("You are terse."));
+        assert_eq!(options.user_template_override.as_deref(), Some("{{text}}"));
+        let glossary = options.glossary.unwrap();
+        assert_eq!(
+            glossary,
+            vec![
+                GlossaryEntry {
+                    source: "Emendly".into(),
+                    target: None,
+                    do_not_translate: true,
+                    note: None,
+                },
+                GlossaryEntry {
+                    source: "engine".into(),
+                    target: Some("motor".into()),
+                    do_not_translate: false,
+                    note: Some("product term".into()),
+                },
+                GlossaryEntry {
+                    source: "shell".into(),
+                    target: Some("casca".into()),
+                    do_not_translate: false,
+                    note: None,
+                },
+            ]
+        );
+
+        let reload = parse_request(r#"{"id":"g2","type":"actions.reload"}"#).unwrap();
+        assert_eq!(reload.kind, RequestKind::ActionsReload);
+
+        let empty_entry: GlossaryEntry = serde_json::from_str("{}").unwrap();
+        assert_eq!(empty_entry, GlossaryEntry::default());
+    }
+
+    #[test]
+    fn extension_options_are_skipped_when_absent() {
+        let req =
+            parse_request(r#"{"id":"m1","type":"actions.run","action":"proofread","text":"hi"}"#)
+                .unwrap();
+        let value = serde_json::to_value(&req).unwrap();
+        let options = &value["options"];
+        for key in [
+            "system_prefix",
+            "system_override",
+            "user_template_override",
+            "glossary",
+        ] {
+            assert!(options.get(key).is_none(), "{key} must be absent");
+        }
+        assert_eq!(
+            req,
+            Request {
+                id: "m1".into(),
+                kind: RequestKind::ActionsRun {
+                    action: "proofread".into(),
+                    text: "hi".into(),
+                    options: ActionOptions::default(),
+                    context: None,
+                    app: None,
+                    stream: None,
+                },
+            }
+        );
     }
 }

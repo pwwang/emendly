@@ -151,7 +151,58 @@
         <Trigger Property="IsKeyboardFocused" Value="True">
           <Setter Property="BorderBrush" Value="#3B82F6" />
         </Trigger>
+        <Trigger Property="IsEnabled" Value="False">
+          <Setter Property="Opacity" Value="0.5" />
+        </Trigger>
       </Style.Triggers>
+    </Style>
+
+    <Style x:Key="DarkCheckBoxStyle" TargetType="CheckBox">
+      <Setter Property="Foreground" Value="#D1D5DB" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="CheckBox">
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+              <Border x:Name="CheckBorder"
+                      Width="16"
+                      Height="16"
+                      Background="#2A2A34"
+                      BorderBrush="#3B3B48"
+                      BorderThickness="1"
+                      CornerRadius="3"
+                      VerticalAlignment="Center"
+                      SnapsToDevicePixels="True">
+                <Path x:Name="CheckMark"
+                      Data="M 3 8 L 6.5 11.5 L 13 4.5"
+                      Stroke="#FFFFFF"
+                      StrokeThickness="1.8"
+                      StrokeStartLineCap="Round"
+                      StrokeEndLineCap="Round"
+                      StrokeLineJoin="Round"
+                      Visibility="Collapsed" />
+              </Border>
+              <ContentPresenter Margin="8,0,0,0"
+                                VerticalAlignment="Center"
+                                RecognizesAccessKey="True" />
+            </StackPanel>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="CheckBorder" Property="Background" Value="#2563EB" />
+                <Setter TargetName="CheckBorder" Property="BorderBrush" Value="#3B82F6" />
+                <Setter TargetName="CheckMark" Property="Visibility" Value="Visible" />
+              </Trigger>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="CheckBorder" Property="BorderBrush" Value="#60A5FA" />
+              </Trigger>
+              <Trigger Property="IsKeyboardFocused" Value="True">
+                <Setter TargetName="CheckBorder" Property="BorderBrush" Value="#93C5FD" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
     </Style>
 
     <Style x:Key="DialogPrimaryButtonStyle" TargetType="Button">
@@ -220,6 +271,34 @@
     <TextBlock Text="Model" Foreground="#D1D5DB" Margin="0,12,0,4" />
     <TextBox x:Name="ModelBox"
              Style="{StaticResource DarkTextBoxStyle}" />
+
+    <Grid Margin="0,12,0,0">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+      <CheckBox x:Name="CheckUpdatesOnStartupBox"
+                Grid.Column="0"
+                Content="Check for updates on startup"
+                Style="{StaticResource DarkCheckBoxStyle}"
+                VerticalAlignment="Center" />
+      <StackPanel Grid.Column="1"
+                  Orientation="Horizontal"
+                  VerticalAlignment="Center">
+        <TextBlock x:Name="UpdateStatusText"
+                   Foreground="#9CA3AF"
+                   FontSize="11"
+                   VerticalAlignment="Center"
+                   Margin="0,0,8,0"
+                   Visibility="Collapsed" />
+        <Button x:Name="CheckUpdatesButton"
+                Content="Check now"
+                Width="Auto"
+                Padding="10,4"
+                Style="{StaticResource DialogSecondaryButtonStyle}"
+                Click="OnCheckUpdatesClick" />
+      </StackPanel>
+    </Grid>
 
     <Border Background="#141419"
             BorderBrush="#2C2C36"

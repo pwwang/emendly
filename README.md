@@ -15,6 +15,13 @@
   <img alt="licence MIT" src="https://img.shields.io/badge/licence-MIT-3F8F5A?style=flat-square" />
 </p>
 
+<p align="center">
+  <a href="site/index.html">Website</a> ·
+  <a href="https://github.com/pwwang/emendly/releases/latest">Download</a> ·
+  <a href="site/privacy.html">Privacy</a> ·
+  <a href="#free-vs-pro">Pro</a>
+</p>
+
 ---
 
 Select a sentence in any app, press **Ctrl+Alt+E**, and Emendly offers the actions that fit what it sees. Nothing is read until you press the key, and nothing is sent anywhere except the model provider you configured.
@@ -102,6 +109,23 @@ Windows apps hide their text in different ways, so the shell tries strategies in
 
 The panel stays open when you click elsewhere: only an explicit close dismisses it.
 
+## Install
+
+Grab the latest build from [GitHub Releases](https://github.com/pwwang/emendly/releases/latest):
+
+- **Windows installer** — `Emendly-vX.Y.Z-win-x64-setup.exe`. Installs per-user to `%LOCALAPPDATA%\Programs\Emendly`, no admin prompt, and adds a Start Menu shortcut and uninstaller.
+- **Portable zip** — `Emendly-vX.Y.Z-win-x64.zip`. Unpack anywhere; the engine and its prompt templates sit beside `Emendly.App.exe`.
+
+Or install with winget (manifest lives in `packaging/winget/`):
+
+```sh
+winget install pwwang.Emendly
+```
+
+After installing, set your endpoint and model in **Settings** and point `EMENDLY_API_KEY` at your provider key (see [Build it](#build-it) for the details).
+
+Installed builds can check GitHub Releases for a newer version on startup, at most once every 24 hours. The check sends only a versioned User-Agent; turn it off in **Settings**.
+
 ## Build it
 
 Requires the .NET 9 SDK, the Rust toolchain, and a Windows toolchain for the sidecar.
@@ -122,15 +146,34 @@ set EMENDLY_API_KEY=sk-...
 
 The key is read from the environment and never written to disk. Settings live in `%APPDATA%\Emendly\settings.json`.
 
+## Free vs Pro
+
+The core engine and Windows shell in this repository are **MIT, forever**: all nine actions, all three capture strategies, selection and caret branching, read-only detection, and bring-your-own-key against any OpenAI-compatible endpoint or a local Ollama / LM Studio server.
+
+An optional closed-source **Emendly Pro** build ($24 one-time, 14-day free trial) adds workflow features on top of the same engine, under the extension hooks in `shell/windows/Emendly.App/Extensions/` and `docs/tasks/0018-engine-extension-hooks.md`:
+
+- Saved Prompt Library with per-prompt hotkeys
+- Visual per-app capture profile editor
+- Searchable local run history
+- Custom terminology glossary
+- Custom tone presets
+- Action chaining and multi-paragraph batch runs
+- `emendly-cli` for scripting and editor integration
+- 12 months of priority email support
+
+Pro is **also BYOK**: the $24 buys the software, not API usage, so there is no subscription and your text never passes through an Emendly server in either tier.
+
 ## Privacy
 
 - Text is read only after the hotkey, and only from the focused field.
 - Logs record action names, app names, latency and byte counts — never your text.
 - Requests go to the endpoint you configure. There is no Emendly service in the path.
 
+The full policy, including every local file Emendly writes, is in [`site/privacy.html`](site/privacy.html).
+
 ## Status
 
-Windows shell and Rust engine are working end to end: capture, menu, streaming results, replace, settings, tray. macOS and Linux shells are planned; the engine protocol is platform-neutral by design.
+Windows shell and Rust engine are working end to end: capture, menu, streaming results, replace, settings, tray, and a release pipeline that ships an installer, a portable zip and a winget manifest. A native Swift menu-bar shell for macOS lives in `shell/macos/`; the Rust engine builds on Windows, macOS and Linux, and the protocol is platform-neutral by design.
 
 ## Layout
 
@@ -138,7 +181,10 @@ Windows shell and Rust engine are working end to end: capture, menu, streaming r
 |---|---|
 | `engine/` | Rust sidecar: actions, prompt templates, providers, streaming, token accounting |
 | `shell/windows/` | WPF shell: capture strategies, panel, settings, tray |
-| `docs/` | protocol, architecture, app coverage, decision records |
+| `shell/macos/` | Swift menu-bar shell for macOS |
+| `packaging/winget/` | winget manifest for `winget install pwwang.Emendly` |
+| `site/` | Static landing page and privacy policy, deployed to GitHub Pages |
+| `docs/` | protocol, architecture, app coverage, decision records, signing guide |
 
 ## Licence
 

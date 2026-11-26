@@ -1,7 +1,9 @@
 using System;
+using System.Threading;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
+using System.Windows.Media;
 using Emendly.Capture;
 
 namespace Emendly.App;
@@ -22,6 +24,8 @@ public partial class SettingsWindow : Window
     private string _pendingHotkey;
     private bool _capturingHotkey;
     private string _languageAtOpen = LanguageSettings.DefaultTargetLanguage;
+    private CancellationTokenSource? _updateCheckCts;
+    private bool _checkingUpdates;
 
     public event EventHandler? Saved;
 
@@ -59,6 +63,7 @@ public partial class SettingsWindow : Window
 
         BaseUrlBox.Text = current.BaseUrl;
         ModelBox.Text = current.Model;
+        CheckUpdatesOnStartupBox.IsChecked = current.CheckUpdatesOnStartup;
 
         EngineStatusText.Text = $"Backend: {transformerStatus}";
         var hasKey = !string.IsNullOrEmpty(AppSettings.ReadApiKey());
@@ -101,6 +106,20 @@ public partial class SettingsWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        if (_updateCheckCts is not null)
+        {
+            try
+            {
+                _updateCheckCts.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+
+            _updateCheckCts.Dispose();
+            _updateCheckCts = null;
+        }
+
         if (_engineVersionRefresh is not null)
         {
             VersionInfo.RefreshRequested -= _engineVersionRefresh;
@@ -416,10 +435,77 @@ public partial class SettingsWindow : Window
 
         _settings.BaseUrl = baseUrl;
         _settings.Model = model;
+        _settings.CheckUpdatesOnStartup = CheckUpdatesOnStartupBox.IsChecked == true;
         _settings.Save();
 
         Saved?.Invoke(this, EventArgs.Empty);
         Close();
+    }
+
+    private async void OnCheckUpdatesClick(object sender, RoutedEventArgs e)
+    {
+        if (_checkingUpdates)
+        {
+            return;
+        }
+
+        _checkingUpdates = true;
+        CheckUpdatesButton.IsEnabled = false;
+        UpdateStatusText.Text = "Checking...";
+        UpdateStatusText.Foreground = new SolidColorBrush(Color.FromRgb(0x9C, 0xA3, 0xAF));
+        UpdateStatusText.Visibility = Visibility.Visible;
+
+        _updateCheckCts?.Dispose();
+        var cts = new CancellationTokenSource();
+        _updateCheckCts = cts;
+
+        try
+        {
+            var result = await UpdateChecker.CheckForUpdatesAsync(cts.Token);
+            if (result.Status != UpdateCheckStatus.Error)
+            {
+                try
+                {
+                    _settings.LastUpdateCheckUtc = DateTimeOffset.UtcNow;
+                    _settings.Save();
+                }
+                catch (Exception)
+                {
+                    // Ignore write errors while recording update check time.
+                }
+            }
+
+            switch (result.Status)
+            {
+                case UpdateCheckStatus.UpdateAvailable:
+                    UpdateStatusText.Text = $"v{result.LatestVersion} available";
+                    UpdateStatusText.Foreground = new SolidColorBrush(Color.FromRgb(0x60, 0xA5, 0xFA));
+                    var dialog = new UpdateDialog(result)
+                    {
+                        Owner = this,
+                        Topmost = Topmost,
+                    };
+                    dialog.Show();
+                    break;
+                case UpdateCheckStatus.UpToDate:
+                    UpdateStatusText.Text = "Up to date";
+                    UpdateStatusText.Foreground = new SolidColorBrush(Color.FromRgb(0x34, 0xD3, 0x99));
+                    break;
+                default:
+                    UpdateStatusText.Text = "Could not check";
+                    UpdateStatusText.Foreground = new SolidColorBrush(Color.FromRgb(0xF8, 0x71, 0x71));
+                    break;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Window closed while checking.
+        }
+        finally
+        {
+            _checkingUpdates = false;
+            CheckUpdatesButton.IsEnabled = true;
+        }
     }
 
     private void OnCancelClick(object sender, RoutedEventArgs e)

@@ -1,0 +1,7 @@
+{
+  "com.microsoft.VSCode": "clipboard",
+  "com.apple.Terminal": "clipboard-nokeys",
+  "com.googlecode.iterm2": "clipboard-nokeys",
+  "com.apple.Preview": "clipboard-ro",
+  "dev.warp.Warp-Stable": "clipboard-nokeys"
+}

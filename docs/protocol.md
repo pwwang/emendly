@@ -16,6 +16,7 @@ Every request is one line with an `id` and a `type`.
 ```json
 {"id":"r1","type":"health"}
 {"id":"r2","type":"actions.list"}
+{"id":"r2b","type":"actions.reload"}
 {"id":"r3","type":"config.get"}
 {"id":"r4","type":"config.set","patch":{"model":"gpt-5-mini"}}
 {"id":"r5","type":"actions.run","action":"proofread","text":"their going too the store"}
@@ -32,6 +33,42 @@ Rules:
 - `text` is the selected text, or empty for `compose`.
 - `options` is free-form per action; unknown keys are ignored, not rejected.
 - `context` is optional surrounding text the shell read from the same field. The engine never reads it from anywhere else.
+
+### Extension options
+
+`actions.run` accepts four optional keys inside `options`. All are additive; a request that omits them behaves exactly as before.
+
+| Key | Type | Effect |
+|---|---|---|
+| `system_prefix` | string | Prepended to the action's system prompt, separated by a blank line. Use it for tone presets or caller-supplied instructions. |
+| `system_override` | string | Replaces the action's system prompt entirely. Blank strings are ignored. |
+| `user_template_override` | string | Replaces the action's `user_template`. Supports the same placeholders: `{{text}}`, `{{tone}}`, `{{target_lang}}`, `{{brief}}`, `{{instruction}}`, `{{context}}`. |
+| `glossary` | array | Terminology rules, rendered into the system prompt. |
+
+Each glossary entry is an object; every field is optional:
+
+```json
+{"source":"Emendly","do_not_translate":true}
+{"source":"engine","target":"Motor","note":"product term"}
+```
+
+The engine renders a deterministic block, skipping entries whose `source` is empty:
+
+```
+Terminology rules (follow strictly):
+- "Emendly" -> keep exactly as "Emendly" (do not translate)
+- "engine" -> "Motor" (note: product term)
+```
+
+Final system prompt order: `system_prefix`, glossary block, then the base system prompt (`system_override` if present, otherwise the action's own). Blocks are joined with a blank line. When both overrides are supplied to the `custom` action, `instruction` may be omitted, because the saved prompt already carries it.
+
+The engine never logs the contents of `system_prefix`, `system_override`, `user_template_override` or `glossary`.
+
+### Reloading actions
+
+`actions.reload` re-reads the action directory from disk and replies with the same `actions` event as `actions.list`. If the reload fails, the engine emits an `error` event and keeps serving the previous registry.
+
+Extra action files are read from the directory named by `EMENDLY_EXTRA_ACTIONS_DIR`, when that variable is set and points to an existing directory. Files are `*.toml` with the same schema as the built-in actions, and new names are added alongside the built-ins. A built-in id can never be replaced from the extra directory. A malformed file fails the reload with `internal`; the engine never silently drops a broken action.
 
 ## Events
 

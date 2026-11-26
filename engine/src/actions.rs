@@ -5,9 +5,10 @@ use std::{env, fs};
 use serde::Deserialize;
 
 use crate::config::Config;
-use crate::protocol::{ActionInfo, ActionOptions, EngineError};
+use crate::protocol::{ActionInfo, ActionOptions, EngineError, GlossaryEntry};
 
 pub const ENV_ACTIONS_DIR: &str = "EMENDLY_ACTIONS_DIR";
+pub const ENV_EXTRA_ACTIONS_DIR: &str = "EMENDLY_EXTRA_ACTIONS_DIR";
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Action {
@@ -34,31 +35,31 @@ pub struct ActionRegistry {
 
 impl ActionRegistry {
     pub fn load_default() -> Result<Self, EngineError> {
-        Self::load_from_dir(&resolve_actions_dir()?)
+        let primary = resolve_actions_dir()?;
+        Self::load_from_dirs(&primary, resolve_extra_actions_dir().as_deref())
     }
 
     pub fn load_from_dir(dir: &Path) -> Result<Self, EngineError> {
-        let entries = fs::read_dir(dir)
-            .map_err(|e| EngineError::Internal(format!("failed to read actions dir: {e}")))?;
+        Self::load_from_dirs(dir, None)
+    }
 
+    pub fn load_from_dirs(primary: &Path, extra: Option<&Path>) -> Result<Self, EngineError> {
         let mut actions = BTreeMap::new();
-        for entry in entries {
-            let path = entry
-                .map_err(|e| EngineError::Internal(format!("failed to read action entry: {e}")))?
-                .path();
-            if path.extension().and_then(|e| e.to_str()) != Some("toml") {
-                continue;
-            }
-            let raw = fs::read_to_string(&path)
-                .map_err(|e| EngineError::Internal(format!("failed to read action file: {e}")))?;
-            let action: Action = toml::from_str(&raw)
-                .map_err(|e| EngineError::Internal(format!("invalid action TOML: {e}")))?;
-            actions.insert(action.name.clone(), action);
-        }
+        load_dir_into(&mut actions, primary)?;
 
         if actions.is_empty() {
             return Err(EngineError::Internal("no action definitions found".into()));
         }
+
+        if let Some(dir) = extra.filter(|d| d.is_dir()) {
+            // Extra files may only add actions; built-in ids always stay intact.
+            let mut extra_actions = BTreeMap::new();
+            load_dir_into(&mut extra_actions, dir)?;
+            for (name, action) in extra_actions {
+                actions.entry(name).or_insert(action);
+            }
+        }
+
         Ok(Self { actions })
     }
 
@@ -93,21 +94,105 @@ impl ActionRegistry {
             )));
         }
 
-        if action_name == "custom" && non_empty(options.instruction.as_deref()).is_none() {
+        let has_override = non_empty(options.system_override.as_deref()).is_some()
+            || non_empty(options.user_template_override.as_deref()).is_some();
+        if action_name == "custom"
+            && non_empty(options.instruction.as_deref()).is_none()
+            && !has_override
+        {
             return Err(EngineError::BadRequest(
                 "action 'custom' requires non-empty instruction".into(),
             ));
         }
 
         let vars = build_template_vars(text, options, top_context, config);
-        let body = render_template(&action.user_template, &vars);
+        let template = non_empty(options.user_template_override.as_deref())
+            .unwrap_or(action.user_template.as_str());
+        let body = render_template(template, &vars);
         let user = assemble_user_message(body, options);
         Ok(RenderedPrompt {
-            system: action.system_prompt.clone(),
+            system: assemble_system_prompt(action, options),
             user,
             max_tokens: action.max_tokens,
         })
     }
+}
+
+fn load_dir_into(actions: &mut BTreeMap<String, Action>, dir: &Path) -> Result<(), EngineError> {
+    let entries = fs::read_dir(dir)
+        .map_err(|e| EngineError::Internal(format!("failed to read actions dir: {e}")))?;
+
+    for entry in entries {
+        let path = entry
+            .map_err(|e| EngineError::Internal(format!("failed to read action entry: {e}")))?
+            .path();
+        if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+            continue;
+        }
+        let raw = fs::read_to_string(&path)
+            .map_err(|e| EngineError::Internal(format!("failed to read action file: {e}")))?;
+        let action: Action = toml::from_str(&raw)
+            .map_err(|e| EngineError::Internal(format!("invalid action TOML: {e}")))?;
+        if action.name.trim().is_empty() {
+            return Err(EngineError::Internal(
+                "action definition has an empty name".into(),
+            ));
+        }
+        actions.insert(action.name.clone(), action);
+    }
+    Ok(())
+}
+
+fn format_glossary(glossary: &[GlossaryEntry]) -> Option<String> {
+    let mut lines = Vec::new();
+    for entry in glossary {
+        let source = entry.source.trim();
+        if source.is_empty() {
+            continue;
+        }
+        let line = if entry.do_not_translate {
+            format!("- \"{source}\" -> keep exactly as \"{source}\" (do not translate)")
+        } else {
+            let target = entry.target.as_deref().map(str::trim).unwrap_or("");
+            if target.is_empty() {
+                continue;
+            }
+            match non_empty(entry.note.as_deref()) {
+                Some(note) => format!("- \"{source}\" -> \"{target}\" (note: {note})"),
+                None => format!("- \"{source}\" -> \"{target}\""),
+            }
+        };
+        lines.push(line);
+    }
+
+    if lines.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "Terminology rules (follow strictly):\n{}",
+            lines.join("\n")
+        ))
+    }
+}
+
+fn assemble_system_prompt(action: &Action, options: &ActionOptions) -> String {
+    let base = non_empty(options.system_override.as_deref())
+        .unwrap_or(action.system_prompt.as_str())
+        .trim();
+
+    let glossary_block = options.glossary.as_deref().and_then(format_glossary);
+
+    let mut blocks: Vec<&str> = Vec::with_capacity(3);
+    if let Some(prefix) = non_empty(options.system_prefix.as_deref()) {
+        blocks.push(prefix);
+    }
+    if let Some(block) = glossary_block.as_deref() {
+        blocks.push(block);
+    }
+    if !base.is_empty() {
+        blocks.push(base);
+    }
+    blocks.join("\n\n")
 }
 
 fn non_empty(opt: Option<&str>) -> Option<&str> {
@@ -195,6 +280,12 @@ fn render_template(template: &str, vars: &BTreeMap<String, String>) -> String {
     out.trim().to_string()
 }
 
+pub fn resolve_extra_actions_dir() -> Option<PathBuf> {
+    let value = env::var(ENV_EXTRA_ACTIONS_DIR).ok()?;
+    let path = PathBuf::from(value.trim());
+    path.is_dir().then_some(path)
+}
+
 pub fn resolve_actions_dir() -> Result<PathBuf, EngineError> {
     if let Ok(path) = env::var(ENV_ACTIONS_DIR) {
         let p = PathBuf::from(path);
@@ -232,11 +323,22 @@ pub fn resolve_actions_dir() -> Result<PathBuf, EngineError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::ErrorCode;
+    use crate::protocol::{ErrorCode, GlossaryEntry};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn repo_registry() -> ActionRegistry {
         ActionRegistry::load_from_dir(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("actions"))
             .unwrap()
+    }
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = env::temp_dir().join(format!("emendly-actions-{tag}-{nanos}"));
+        fs::create_dir_all(&dir).unwrap();
+        dir
     }
 
     #[test]
@@ -369,7 +471,9 @@ mod tests {
         let rw_before = reg
             .render("rewrite", "Target.", &before_only, None, &cfg)
             .unwrap();
-        assert!(rw_before.user.starts_with("Context before:\nOnly before.\n\n"));
+        assert!(rw_before
+            .user
+            .starts_with("Context before:\nOnly before.\n\n"));
         assert!(!rw_before.user.contains("Context after:"));
 
         let after_only = ActionOptions {
@@ -419,5 +523,207 @@ mod tests {
                 .code(),
             ErrorCode::UnknownAction
         );
+    }
+
+    #[test]
+    fn assembles_system_prefix_glossary_and_base_prompt_in_order() {
+        let reg = repo_registry();
+        let cfg = Config::default();
+        let base = reg
+            .render("translate", "Hello", &ActionOptions::default(), None, &cfg)
+            .unwrap()
+            .system;
+
+        let opts = ActionOptions {
+            system_prefix: Some("You are a careful technical translator.".into()),
+            glossary: Some(vec![
+                GlossaryEntry {
+                    source: "Emendly".into(),
+                    do_not_translate: true,
+                    ..Default::default()
+                },
+                GlossaryEntry {
+                    source: "engine".into(),
+                    target: Some("motor".into()),
+                    note: Some("product term".into()),
+                    ..Default::default()
+                },
+                GlossaryEntry {
+                    source: "shell".into(),
+                    target: Some("casca".into()),
+                    ..Default::default()
+                },
+                GlossaryEntry {
+                    source: "   ".into(),
+                    target: Some("ignored".into()),
+                    ..Default::default()
+                },
+            ]),
+            ..Default::default()
+        };
+        let rendered = reg.render("translate", "Hello", &opts, None, &cfg).unwrap();
+
+        let expected = format!(
+            "You are a careful technical translator.\n\n\
+             Terminology rules (follow strictly):\n\
+             - \"Emendly\" -> keep exactly as \"Emendly\" (do not translate)\n\
+             - \"engine\" -> \"motor\" (note: product term)\n\
+             - \"shell\" -> \"casca\"\n\n\
+             {base}"
+        );
+        assert_eq!(rendered.system, expected);
+        assert!(!rendered.system.contains("ignored"));
+        assert!(rendered.system.ends_with(&base));
+    }
+
+    #[test]
+    fn glossary_without_any_usable_entries_leaves_system_prompt_alone() {
+        let reg = repo_registry();
+        let cfg = Config::default();
+        let base = reg
+            .render("proofread", "hi", &ActionOptions::default(), None, &cfg)
+            .unwrap()
+            .system;
+
+        let opts = ActionOptions {
+            glossary: Some(vec![GlossaryEntry {
+                source: "  ".into(),
+                ..Default::default()
+            }]),
+            ..Default::default()
+        };
+        let rendered = reg.render("proofread", "hi", &opts, None, &cfg).unwrap();
+        assert_eq!(rendered.system, base);
+    }
+
+    #[test]
+    fn overrides_apply_on_custom_without_instruction() {
+        let reg = repo_registry();
+        let cfg = Config::default();
+
+        let opts = ActionOptions {
+            system_override: Some("You are a saved prompt.".into()),
+            user_template_override: Some("Rewrite {{text}} in {{tone}}.".into()),
+            tone: Some("warm".into()),
+            ..Default::default()
+        };
+        let rendered = reg.render("custom", "Draft.", &opts, None, &cfg).unwrap();
+        assert_eq!(rendered.system, "You are a saved prompt.");
+        assert_eq!(rendered.user, "Rewrite Draft. in warm.");
+
+        // An override on its own is enough to skip the instruction requirement.
+        let only_system = ActionOptions {
+            system_override: Some(" Saved prompt. ".into()),
+            ..Default::default()
+        };
+        let rendered = reg.render("custom", "", &only_system, None, &cfg).unwrap();
+        assert_eq!(rendered.system, "Saved prompt.");
+
+        let only_template = ActionOptions {
+            user_template_override: Some("{{text}}".into()),
+            ..Default::default()
+        };
+        assert!(reg
+            .render("custom", "Hi.", &only_template, None, &cfg)
+            .is_ok());
+
+        let blank_overrides = ActionOptions {
+            system_override: Some("   ".into()),
+            user_template_override: Some("\n".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            reg.render("custom", "hi", &blank_overrides, None, &cfg)
+                .unwrap_err()
+                .code(),
+            ErrorCode::BadRequest
+        );
+    }
+
+    #[test]
+    fn blank_override_falls_back_to_action_system_prompt() {
+        let reg = repo_registry();
+        let cfg = Config::default();
+        let base = reg
+            .render("rewrite", "hi", &ActionOptions::default(), None, &cfg)
+            .unwrap()
+            .system;
+
+        let opts = ActionOptions {
+            system_override: Some("  \n ".into()),
+            user_template_override: Some("   ".into()),
+            ..Default::default()
+        };
+        let rendered = reg.render("rewrite", "hi", &opts, None, &cfg).unwrap();
+        assert_eq!(rendered.system, base);
+        assert!(rendered.user.contains("hi"));
+    }
+
+    #[test]
+    fn loads_extra_action_dir_alongside_builtins() {
+        let primary = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("actions");
+        let extra = temp_dir("extra");
+        fs::write(
+            extra.join("summarize.toml"),
+            "name = \"summarize\"\ndescription = \"Condense text.\"\nrequires_text = true\nmax_tokens = 512\nsystem_prompt = \"Summarize the user's text concisely.\"\nuser_template = \"Text:\\n{{text}}\"\n",
+        )
+        .unwrap();
+
+        let reg = ActionRegistry::load_from_dirs(&primary, Some(&extra)).unwrap();
+        let names: Vec<_> = reg.list().into_iter().map(|a| a.name).collect();
+        assert_eq!(names.len(), 10);
+        assert!(names.contains(&"summarize".to_string()));
+        assert!(names.contains(&"proofread".to_string()));
+
+        let rendered = reg
+            .render(
+                "summarize",
+                "A long story.",
+                &ActionOptions::default(),
+                None,
+                &Config::default(),
+            )
+            .unwrap();
+        assert_eq!(rendered.user, "Text:\nA long story.");
+        assert_eq!(rendered.max_tokens, Some(512));
+
+        fs::remove_dir_all(&extra).unwrap();
+    }
+
+    #[test]
+    fn extra_dir_cannot_shadow_builtin_actions() {
+        let primary = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("actions");
+        let extra = temp_dir("shadow");
+        fs::write(
+            extra.join("rewrite.toml"),
+            "name = \"rewrite\"\ndescription = \"Hijacked.\"\nrequires_text = true\nsystem_prompt = \"Hijacked.\"\nuser_template = \"{{text}}\"\n",
+        )
+        .unwrap();
+
+        let builtin = ActionRegistry::load_from_dir(&primary).unwrap();
+        let reg = ActionRegistry::load_from_dirs(&primary, Some(&extra)).unwrap();
+        assert_eq!(reg.list(), builtin.list());
+
+        fs::remove_dir_all(&extra).unwrap();
+    }
+
+    #[test]
+    fn malformed_extra_action_surfaces_a_typed_error() {
+        let primary = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("actions");
+        let extra = temp_dir("broken");
+        fs::write(extra.join("broken.toml"), "name = \"broken\"\n").unwrap();
+
+        let err = ActionRegistry::load_from_dirs(&primary, Some(&extra)).unwrap_err();
+        assert_eq!(err.code(), ErrorCode::Internal);
+
+        fs::remove_dir_all(&extra).unwrap();
+    }
+
+    #[test]
+    fn missing_extra_dir_is_ignored() {
+        let primary = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("actions");
+        let absent = primary.join("does-not-exist");
+        let reg = ActionRegistry::load_from_dirs(&primary, Some(&absent)).unwrap();
+        assert_eq!(reg.list().len(), 9);
     }
 }

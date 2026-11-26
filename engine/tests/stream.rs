@@ -39,6 +39,15 @@ impl Drop for TempConfig {
 }
 
 fn spawn_engine(cfg: Option<&TempConfig>, api_key: Option<&str>, args: &[&str]) -> Child {
+    spawn_engine_with_env(cfg, api_key, args, &[])
+}
+
+fn spawn_engine_with_env(
+    cfg: Option<&TempConfig>,
+    api_key: Option<&str>,
+    args: &[&str],
+    env: &[(&str, &str)],
+) -> Child {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_emendly-engine"));
     cmd.args(args).stdin(Stdio::piped()).stdout(Stdio::piped());
     match cfg {
@@ -49,6 +58,11 @@ fn spawn_engine(cfg: Option<&TempConfig>, api_key: Option<&str>, args: &[&str]) 
         Some(k) => cmd.env("EMENDLY_API_KEY", k),
         None => cmd.env_remove("EMENDLY_API_KEY"),
     };
+    cmd.env_remove("EMENDLY_ACTIONS_DIR");
+    cmd.env_remove("EMENDLY_EXTRA_ACTIONS_DIR");
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
     cmd.spawn().unwrap()
 }
 
@@ -344,6 +358,31 @@ fn send_until_terminal(
     events
 }
 
+struct TempDir(PathBuf);
+
+impl TempDir {
+    fn new() -> Self {
+        static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+        let seq = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = env::temp_dir().join(format!(
+            "emendly-it-dir-{}-{nanos}-{seq}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&path).unwrap();
+        Self(path)
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
 #[test]
 fn menu_actions_options_and_context_handling() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -423,4 +462,100 @@ fn menu_actions_options_and_context_handling() {
     drop(stdin);
     assert!(child.wait().unwrap().success());
     server.join().unwrap();
+}
+
+#[test]
+fn actions_reload_and_glossary_system_prefix_reach_the_provider() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (req_tx, req_rx) = mpsc::channel();
+
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        req_tx.send(read_http_request(&mut stream)).unwrap();
+        let resp = concat!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"Guten \"}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"Tag\"}}]}\n\n",
+            "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":40,\"completion_tokens\":4}}\n\n",
+            "data: [DONE]\n\n"
+        );
+        stream.write_all(resp.as_bytes()).unwrap();
+        stream.flush().unwrap();
+    });
+
+    let extra = TempDir::new();
+    fs::write(
+        extra.0.join("summarize.toml"),
+        "name = \"summarize\"\ndescription = \"Condense text.\"\nrequires_text = true\nsystem_prompt = \"Summarize concisely.\"\nuser_template = \"Text:\\n{{text}}\"\n",
+    )
+    .unwrap();
+
+    let cfg = TempConfig::new(&format!("http://{addr}/v1"), 10_000);
+    let extra_path = extra.0.to_str().unwrap().to_string();
+    let mut child = spawn_engine_with_env(
+        Some(&cfg),
+        Some("test-mock-key"),
+        &[],
+        &[("EMENDLY_EXTRA_ACTIONS_DIR", &extra_path)],
+    );
+    let mut stdin = child.stdin.take().unwrap();
+    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+
+    writeln!(stdin, r#"{{"id":"l1","type":"actions.list"}}"#).unwrap();
+    stdin.flush().unwrap();
+    let initial: Value = serde_json::from_str(&lines.next().unwrap().unwrap()).unwrap();
+    assert_eq!(initial["event"], "actions");
+    assert_eq!(initial["actions"].as_array().unwrap().len(), 10);
+
+    writeln!(stdin, r#"{{"id":"l2","type":"actions.reload"}}"#).unwrap();
+    stdin.flush().unwrap();
+    let reloaded: Value = serde_json::from_str(&lines.next().unwrap().unwrap()).unwrap();
+    assert_eq!(
+        (&reloaded["id"], &reloaded["event"]),
+        (&Value::from("l2"), &Value::from("actions"))
+    );
+    let names: Vec<_> = reloaded["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names.len(), 10);
+    assert!(names.contains(&"summarize"));
+    assert!(names.contains(&"proofread"));
+
+    let events = send_until_terminal(
+        &mut stdin,
+        &mut lines,
+        r#"{"id":"g1","type":"actions.run","action":"translate","text":"Good morning","options":{"target_lang":"German","system_prefix":"Honor the product glossary exactly.","glossary":[{"source":"Emendly","do_not_translate":true},{"source":"engine","target":"Motor","note":"product term"}]}}"#,
+    );
+    writeln!(stdin, r#"{{"id":"s3","type":"shutdown"}}"#).unwrap();
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
+    server.join().unwrap();
+
+    let (_, body) = req_rx.recv().unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    let system = json["messages"][0]["content"].as_str().unwrap();
+    let prefix_at = system.find("Honor the product glossary exactly.").unwrap();
+    let glossary_at = system.find("Terminology rules (follow strictly):").unwrap();
+    let base_at = system.find("Translate the user's text").unwrap();
+    assert!(prefix_at < glossary_at && glossary_at < base_at);
+    assert!(system.contains("- \"Emendly\" -> keep exactly as \"Emendly\" (do not translate)"));
+    assert!(system.contains("- \"engine\" -> \"Motor\" (note: product term)"));
+    assert_eq!(
+        json["messages"][1]["content"].as_str().unwrap(),
+        "Target language: German\n\nText:\nGood morning"
+    );
+
+    assert_eq!(events[0]["event"], "started");
+    let combined: String = events[1..events.len() - 1]
+        .iter()
+        .map(|e| e["text"].as_str().unwrap())
+        .collect();
+    let last = events.last().unwrap();
+    assert_eq!(last["event"], "done");
+    assert_eq!(last["text"], "Guten Tag");
+    assert_eq!(combined, "Guten Tag");
 }
