@@ -17,7 +17,6 @@ ReleaseDate: 2026-11-26
 Installers:
   - Architecture: x64
     InstallerUrl: https://github.com/pwwang/emendly/releases/download/v0.1.2/Emendly-v0.1.2-win-x64-setup.exe
-    # PLACEHOLDER: set from the released asset with packaging/winget/update-manifest.py --installer
-    InstallerSha256: 0000000000000000000000000000000000000000000000000000000000000000
+    InstallerSha256: CF2CF25FD225BDA9C6AB9B7E8372F8629E34568F4DAD465C6F86F26B7FB922F0
 ManifestType: installer
 ManifestVersion: 1.6.0
