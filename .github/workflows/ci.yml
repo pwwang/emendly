@@ -50,6 +50,25 @@ jobs:
           path: engine/target/release/${{ matrix.bin_name }}
           if-no-files-found: error
 
+  macos:
+    name: macOS Shell
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Swift 5.9 ships with the macOS 14 runner image; no toolchain setup needed.
+      - name: Show toolchain
+        run: swift --version
+
+      - name: Build macOS shell
+        working-directory: shell/macos
+        run: swift build -c release
+
+      - name: Test macOS shell
+        working-directory: shell/macos
+        run: swift test
+
   shell:
     name: Windows Shell
     runs-on: windows-latest
