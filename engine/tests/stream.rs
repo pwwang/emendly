@@ -193,7 +193,9 @@ fn once_health_and_missing_key_behave_cleanly() {
         (
             &Value::from("a"),
             &Value::from("health"),
-            &Value::from("0.1.0"),
+            // Read the crate version so a release bump cannot silently break the
+            // very test that ships with it.
+            &Value::from(env!("CARGO_PKG_VERSION")),
             &Value::from(1)
         )
     );
