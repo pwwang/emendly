@@ -17,6 +17,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Emendly.Capture\Emendly.Capture.csproj" />
+    <ProjectReference Include="..\Emendly.Core\Emendly.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>

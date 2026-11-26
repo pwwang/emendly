@@ -24,7 +24,7 @@
         <div class="nav-links">
           <a href="index.html#how-it-works">How it works</a>
           <a href="index.html#actions">Actions</a>
-          <a href="index.html#pricing">Free vs Pro</a>
+          <a href="index.html#support">Open source</a>
           <a href="privacy.html" aria-current="page">Privacy</a>
         </div>
 
@@ -52,7 +52,7 @@
           <a href="#local-files">Files on your device</a>
           <a href="#api-keys">API keys</a>
           <a href="#updates">Update check</a>
-          <a href="#licence">Pro licence</a>
+          <a href="#purchase">No purchase, no licence</a>
           <a href="#contact">Contact</a>
         </nav>
       </div>
@@ -110,12 +110,16 @@
                 <td>Per-application capture strategy overrides you have set, so each app is read the same reliable way next time.</td>
               </tr>
               <tr>
-                <th scope="row"><code>%APPDATA%\Emendly\emendly.log</code></th>
-                <td>Optional, metadata-only log: action name, app name, latency, input and output byte counts, status. <b>Zero user text.</b></td>
+                <th scope="row"><code>%APPDATA%\Emendly\prompts.json</code>, <code>glossary.json</code>, <code>tones.json</code>, <code>chains.json</code></th>
+                <td>The saved prompts, glossary, tone presets and chains you create in the hub. Read again only when you use them.</td>
               </tr>
               <tr>
-                <th scope="row"><code>%APPDATA%\EmendlyPro\</code></th>
-                <td>Pro only: saved prompts, glossary, tone presets, local run history and the licence key. Kept on your machine.</td>
+                <th scope="row"><code>%APPDATA%\Emendly\history.jsonl</code></th>
+                <td>Optional local run history, written only if you leave history recording on. It stays on your machine and you can clear it from the hub.</td>
+              </tr>
+              <tr>
+                <th scope="row"><code>%APPDATA%\Emendly\emendly.log</code></th>
+                <td>Optional, metadata-only log: action name, app name, latency, input and output byte counts, status. <b>Zero user text.</b></td>
               </tr>
             </tbody>
           </table>
@@ -149,14 +153,14 @@
         </p>
       </section>
 
-      <section class="doc-section" id="licence">
-        <h2>6. Pro licence verification</h2>
+      <section class="doc-section" id="purchase">
+        <h2>6. No purchase, no licence</h2>
         <p>
-          The Pro licence is a signed key verified <b>offline</b> on your device using an ECDSA
-          public signature. Emendly does not phone home to validate it, so activating Pro requires
-          no network connection and creates no record on any server of ours.
+          Emendly is MIT licensed and free. There is no paid tier, no licence key, no activation and
+          no purchase path anywhere in the app or on this site. Nothing is verified, and no
+          entitlement check ever runs.
         </p>
-        <p>The free, MIT-licensed build contains no licence check at all.</p>
+        <p>If you want to support the work, donations are handled entirely by GitHub Sponsors or Buy Me a Coffee and never touch the app.</p>
       </section>
 
       <section class="doc-section" id="children">

@@ -10,23 +10,22 @@ Files:
 
 | File | Purpose |
 |---|---|
-| `index.html` | Landing page: hero, showcase, actions, pricing, privacy summary, FAQ |
+| `index.html` | Landing page: hero, showcase, actions, support, privacy summary, FAQ |
 | `privacy.html` | Plain-English privacy policy |
 | `styles.css` | All styling, one file, no framework |
-| `script.js` | Screenshot tabs, copy button, checkout fallback, footer year |
+| `script.js` | Screenshot tabs, copy button, donation button, footer year |
 | `assets/` | Screenshots and app icon copied from `docs/media/` and the Windows shell |
 | `CNAME.example` | Custom-domain template; copy to `CNAME` when the domain is live |
 
-## Enabling the Pro checkout
+## Enabling the donation link
 
-Pro's buy button is inert until a store URL exists. Edit one line in `script.js`:
+The **Buy me a coffee** button stays hidden until a URL exists. Edit one line in `script.js`:
 
 ```js
-const PRO_CHECKOUT_URL = "https://buy.polar.sh/…";
+const DONATE_URL = "https://www.buymeacoffee.com/…";
 ```
 
-With the placeholder empty, clicking **Buy Pro** opens a "not open yet" dialog instead of a
-broken link. With a URL set, the button becomes a normal link in a new tab.
+Leave it empty and the button never renders; the GitHub Sponsors button is always shown.
 
 ## GitHub Pages
 

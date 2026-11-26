@@ -8,6 +8,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Emendly.Capture", "Emendly.
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Emendly.App", "Emendly.App\Emendly.App.csproj", "{7B2E6F48-9C1D-4A3E-8F5B-3C6A9D2E5F04}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Emendly.Core", "Emendly.Core\Emendly.Core.csproj", "{3E9A1C57-2B8D-4F6E-A1C4-5D7B9E3F6A05}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -26,6 +28,10 @@ Global
 		{7B2E6F48-9C1D-4A3E-8F5B-3C6A9D2E5F04}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{7B2E6F48-9C1D-4A3E-8F5B-3C6A9D2E5F04}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{7B2E6F48-9C1D-4A3E-8F5B-3C6A9D2E5F04}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3E9A1C57-2B8D-4F6E-A1C4-5D7B9E3F6A05}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3E9A1C57-2B8D-4F6E-A1C4-5D7B9E3F6A05}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3E9A1C57-2B8D-4F6E-A1C4-5D7B9E3F6A05}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3E9A1C57-2B8D-4F6E-A1C4-5D7B9E3F6A05}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -11,8 +11,8 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using System.Windows.Threading;
-using Emendly.App.Extensions;
 using Emendly.Capture;
+using Emendly.Core;
 
 namespace Emendly.App;
 
@@ -1389,7 +1389,7 @@ public partial class PanelWindow : Window
 
         var sw = Stopwatch.StartNew();
         var streamedText = new StringBuilder();
-        var effectiveRequest = ExtensionHost.ApplyRequestFilters(state.Request);
+        var effectiveRequest = state.Request;
 
         try
         {
@@ -1439,11 +1439,7 @@ public partial class PanelWindow : Window
                 Encoding.UTF8.GetByteCount(_resultText),
                 "ok");
 
-            var completedResult = string.Equals(result.Text, _resultText, StringComparison.Ordinal)
-                && result.LatencyMs == latency
-                ? result
-                : result with { Text = _resultText, LatencyMs = latency };
-            ExtensionHost.NotifyCompleted(effectiveRequest, completedResult, _targetWindow.ProcessName);
+            RecordHistory(effectiveRequest, result, latency);
 
             _canRetry = false;
             if (_stage == PanelStage.Streaming)
@@ -1498,6 +1494,34 @@ public partial class PanelWindow : Window
             }
 
             cts.Dispose();
+        }
+    }
+
+    private void RecordHistory(TransformRequest request, TransformResult result, long latencyMs)
+    {
+        var history = App.History;
+        if (history.IsPaused)
+        {
+            return;
+        }
+
+        try
+        {
+            history.Record(new HistoryEntry
+            {
+                Action = request.Action,
+                AppName = _targetWindow.ProcessName,
+                InputText = request.Text,
+                OutputText = _resultText,
+                Model = _settings.Model,
+                LatencyMs = latencyMs,
+                InputTokens = result.InputTokens,
+                OutputTokens = result.OutputTokens,
+            });
+        }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+        {
+            ShellLogger.LogMeta("history.record", _targetWindow.ProcessName, "error");
         }
     }
 

@@ -1,10 +1,6 @@
 // Emendly landing page — no build step, no dependencies.
-//
-// To enable the Pro checkout, set PRO_CHECKOUT_URL to your store link
-// (Polar.sh, Lemon Squeezy, a GitHub Sponsors page, …). While it is empty the
-// button opens a friendly "not open yet" dialog instead of a broken 404.
-
-const PRO_CHECKOUT_URL = "";
+// Set this to a Buy Me a Coffee URL to show the optional donation button.
+const DONATE_URL = "";
 
 const SHOTS = {
   menu: {
@@ -204,46 +200,19 @@ function initCopyButtons() {
   });
 }
 
-function initCheckout() {
-  const trigger = document.querySelector("[data-checkout]");
-  const dialog = document.getElementById("checkout-dialog");
-  if (!trigger) {
+function initDonate() {
+  const button = document.querySelector("[data-donate]");
+  if (!button) {
     return;
   }
 
-  if (PRO_CHECKOUT_URL) {
-    trigger.setAttribute("href", PRO_CHECKOUT_URL);
-    trigger.setAttribute("rel", "noopener");
-    trigger.removeAttribute("data-checkout");
+  if (!DONATE_URL) {
+    button.hidden = true;
     return;
   }
 
-  trigger.addEventListener("click", (event) => {
-    event.preventDefault();
-    if (dialog && typeof dialog.showModal === "function") {
-      dialog.showModal();
-    } else if (dialog) {
-      dialog.setAttribute("open", "");
-    }
-  });
-
-  if (dialog) {
-    dialog.querySelectorAll("[data-close-dialog]").forEach((button) => {
-      button.addEventListener("click", () => {
-        if (typeof dialog.close === "function") {
-          dialog.close();
-        } else {
-          dialog.removeAttribute("open");
-        }
-      });
-    });
-
-    dialog.addEventListener("click", (event) => {
-      if (event.target === dialog && typeof dialog.close === "function") {
-        dialog.close();
-      }
-    });
-  }
+  button.setAttribute("href", DONATE_URL);
+  button.setAttribute("rel", "noopener");
 }
 
 function initYear() {
@@ -256,7 +225,7 @@ function initYear() {
 function init() {
   initTabs();
   initCopyButtons();
-  initCheckout();
+  initDonate();
   initYear();
 }
 

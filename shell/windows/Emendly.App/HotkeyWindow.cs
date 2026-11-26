@@ -27,6 +27,7 @@ public sealed class HotkeyWindow : IDisposable
     public event EventHandler? HotkeyPressed;
     public event EventHandler? ActivateRequested;
     public event EventHandler? OpenSettingsRequested;
+    public event EventHandler? OpenHubRequested;
 
     public string? RegisteredHotkey { get; private set; }
 
@@ -67,7 +68,7 @@ public sealed class HotkeyWindow : IDisposable
         _source.AddHook(WndProc);
     }
 
-    public static bool NotifyExistingInstance(bool openSettings = false)
+    public static bool NotifyExistingInstance(bool openSettings = false, bool openHub = false)
     {
         if (ActivateMessage == 0)
         {
@@ -80,7 +81,8 @@ public sealed class HotkeyWindow : IDisposable
             return false;
         }
 
-        return PostMessage(hwnd, ActivateMessage, openSettings ? new IntPtr(1) : IntPtr.Zero, IntPtr.Zero);
+        var surface = openSettings ? 1 : openHub ? 2 : 0;
+        return PostMessage(hwnd, ActivateMessage, new IntPtr(surface), IntPtr.Zero);
     }
 
     public bool Register(string hotkeySpec, out string? error)
@@ -300,13 +302,17 @@ public sealed class HotkeyWindow : IDisposable
         else if (ActivateMessage != 0 && (uint)msg == ActivateMessage)
         {
             handled = true;
-            if (wParam != IntPtr.Zero)
+            switch (wParam.ToInt64())
             {
-                OpenSettingsRequested?.Invoke(this, EventArgs.Empty);
-            }
-            else
-            {
-                ActivateRequested?.Invoke(this, EventArgs.Empty);
+                case 1:
+                    OpenSettingsRequested?.Invoke(this, EventArgs.Empty);
+                    break;
+                case 2:
+                    OpenHubRequested?.Invoke(this, EventArgs.Empty);
+                    break;
+                default:
+                    ActivateRequested?.Invoke(this, EventArgs.Empty);
+                    break;
             }
         }
 

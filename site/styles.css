@@ -760,199 +760,68 @@ th code {
 /* A grid or flex child defaults to min-width:auto, so a wide table inside stretches
    the page instead of scrolling inside its own frame. */
 .two-col > *,
-.table-wrap,
-.plan {
+.table-wrap {
   min-width: 0;
 }
 
-/* ---------- Pricing ---------- */
+/* ---------- Support band ---------- */
 
-.pricing-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: clamp(26px, 3vw, 36px);
-}
-
-.plans {
+.support-band {
   display: grid;
-  gap: 16px;
-  grid-template-columns: 1fr;
-  align-items: stretch;
-}
-
-.plan {
-  display: flex;
-  flex-direction: column;
-  padding: 24px 22px;
+  gap: 26px;
+  padding: clamp(24px, 3.4vw, 38px);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
-  background: linear-gradient(180deg, var(--bg-panel), #101116);
+  background:
+    radial-gradient(600px 240px at 100% 0%, rgba(37, 99, 235, 0.1), transparent 70%),
+    var(--bg-panel);
 }
 
-.plan-pro {
-  border-color: rgba(37, 99, 235, 0.5);
-  background: linear-gradient(180deg, rgba(37, 99, 235, 0.09), #101116 58%);
-  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.1),
-    0 30px 70px -50px rgba(37, 99, 235, 0.85);
-}
-
-.plan-top {
+.support-copy {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 6px;
-}
-
-.plan-name {
-  font-size: 0.8125rem;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--text-dim);
-}
-
-.plan-badge {
-  font-family: var(--mono);
-  font-size: 0.6875rem;
-  padding: 3px 8px;
-  border-radius: 999px;
-  border: 1px solid rgba(52, 211, 153, 0.4);
-  color: var(--emerald);
-  background: rgba(52, 211, 153, 0.08);
-}
-
-.plan-pro .plan-badge {
-  border-color: rgba(96, 165, 250, 0.45);
-  color: var(--blue-bright);
-  background: rgba(37, 99, 235, 0.14);
-}
-
-.price {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  margin: 6px 0 2px;
-}
-
-.price .amount {
-  font-size: 2.5rem;
-  font-weight: 700;
-  letter-spacing: -0.035em;
-  line-height: 1;
-}
-
-.price .note {
-  color: var(--text-faint);
-  font-size: 0.8125rem;
-}
-
-.plan-sub {
-  color: var(--text-dim);
-  font-size: 0.875rem;
-  margin: 0 0 18px;
-}
-
-.feature-list {
-  list-style: none;
-  margin: 0 0 22px;
-  padding: 0;
-  display: grid;
-  gap: 9px;
-  font-size: 0.875rem;
-  color: var(--text-dim);
-}
-
-.feature-list li {
-  display: flex;
-  gap: 10px;
+  flex-direction: column;
   align-items: flex-start;
+  gap: 10px;
 }
 
-.feature-list li svg {
-  width: 15px;
-  height: 15px;
+.support-copy .lede {
+  margin: 0;
+}
+
+.support-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.support-band ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 12px;
+}
+
+.support-band li {
+  display: flex;
+  gap: 11px;
+  align-items: flex-start;
+  color: var(--text-dim);
+  font-size: 0.9rem;
+}
+
+.support-band li svg {
+  width: 16px;
+  height: 16px;
   flex: none;
   margin-top: 3px;
   color: var(--emerald);
 }
 
-.plan-pro .feature-list li svg {
-  color: var(--blue-bright);
-}
-
-.feature-list li b {
+.support-band li b {
   color: var(--text);
   font-weight: 600;
-}
-
-.plan .btn {
-  margin-top: auto;
-  width: 100%;
-}
-
-.plan-foot {
-  margin: 12px 0 0;
-  font-size: 0.75rem;
-  color: var(--text-faint);
-  text-align: center;
-}
-
-.byok-note {
-  display: flex;
-  gap: 12px;
-  align-items: flex-start;
-  margin-top: 18px;
-  padding: 15px 17px;
-  border: 1px solid var(--line);
-  border-left: 3px solid var(--emerald-deep);
-  border-radius: 10px;
-  background: rgba(52, 211, 153, 0.045);
-  color: var(--text-dim);
-  font-size: 0.875rem;
-}
-
-.byok-note svg {
-  width: 17px;
-  height: 17px;
-  flex: none;
-  margin-top: 2px;
-  color: var(--emerald);
-}
-
-.byok-note strong {
-  color: var(--text);
-}
-
-.check {
-  color: var(--emerald);
-  font-weight: 700;
-}
-
-.dash {
-  color: var(--text-faint);
-}
-
-.compare {
-  margin-top: 26px;
-}
-
-.compare-caption {
-  margin: 0 0 10px;
-  font-family: var(--mono);
-  font-size: 0.6875rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-}
-
-td.num,
-th.num {
-  text-align: center;
-  width: 96px;
 }
 
 /* ---------- Privacy band ---------- */
@@ -1107,44 +976,6 @@ details.qa .answer p:last-child {
   margin: 18px 0 0;
   color: var(--text-faint);
   font-size: 0.75rem;
-}
-
-/* ---------- Dialog ---------- */
-
-dialog.sheet {
-  width: min(520px, calc(100vw - 32px));
-  padding: 0;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: var(--bg-panel);
-  color: var(--text);
-  box-shadow: 0 40px 90px -30px rgba(0, 0, 0, 0.95);
-}
-
-dialog.sheet::backdrop {
-  background: rgba(5, 6, 9, 0.72);
-  backdrop-filter: blur(3px);
-}
-
-.sheet-body {
-  padding: 22px 22px 20px;
-}
-
-.sheet-body h3 {
-  margin-bottom: 8px;
-}
-
-.sheet-body p {
-  margin: 0 0 14px;
-  color: var(--text-dim);
-  font-size: 0.9rem;
-}
-
-.sheet-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  justify-content: flex-end;
 }
 
 /* ---------- Document pages (privacy) ---------- */
@@ -1315,14 +1146,11 @@ dialog.sheet::backdrop {
     grid-template-columns: minmax(0, 1.02fr) minmax(0, 1fr);
   }
 
-  .plans {
-    grid-template-columns: 1fr 1fr;
-  }
-
   .two-col {
     grid-template-columns: 1fr 1fr;
   }
 
+  .support-band,
   .privacy-band {
     grid-template-columns: 1.15fr 1fr;
     align-items: center;
@@ -1369,12 +1197,8 @@ dialog.sheet::backdrop {
     max-height: 240px;
   }
 
-  .plan {
+  .support-band {
     padding: 20px 18px;
-  }
-
-  .price .amount {
-    font-size: 2.15rem;
   }
 
   table {
@@ -1391,14 +1215,6 @@ dialog.sheet::backdrop {
   thead th,
   tbody th {
     white-space: normal;
-  }
-
-  /* The compare table's row headers carry long feature names; keeping them on one
-     line forces the table wider than the viewport. */
-  td.num,
-  th.num {
-    width: 62px;
-    padding-inline: 8px;
   }
 
   .footer-grid {
@@ -1437,8 +1253,8 @@ dialog.sheet::backdrop {
 
   .window,
   .card,
-  .plan,
   .table-wrap,
+  .support-band,
   .privacy-band,
   details.qa {
     border-color: #ccc;

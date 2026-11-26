@@ -19,7 +19,7 @@
   <a href="site/index.html">Website</a> ·
   <a href="https://github.com/pwwang/emendly/releases/latest">Download</a> ·
   <a href="site/privacy.html">Privacy</a> ·
-  <a href="#free-vs-pro">Pro</a>
+  <a href="#support">Support</a>
 </p>
 
 ---
@@ -32,6 +32,7 @@ Select a sentence in any app, press **Ctrl+Alt+E**, and Emendly offers the actio
 - **On demand by design.** No background scanning, no keystroke logging, no suggestions popping up while you type.
 - **The menu fits the selection.** One word gets proofreading and synonyms; a passage gets rewrite and translation; an empty field gets compose. Nine actions in total.
 - **Bring your own model.** Any OpenAI-compatible endpoint, including a local Ollama or LM Studio server, with your own key.
+- **A hub for the workflow features.** Saved prompts with per-prompt hotkeys, local run history, a terminology glossary, tone presets, per-app capture rules, action chains and multi-paragraph batch runs — all in the same MIT app, opened from the tray.
 
 ## What it looks like
 
@@ -146,22 +147,11 @@ set EMENDLY_API_KEY=sk-...
 
 The key is read from the environment and never written to disk. Settings live in `%APPDATA%\Emendly\settings.json`.
 
-## Free vs Pro
+## Support
 
-The core engine and Windows shell in this repository are **MIT, forever**: all nine actions, all three capture strategies, selection and caret branching, read-only detection, and bring-your-own-key against any OpenAI-compatible endpoint or a local Ollama / LM Studio server.
+Emendly is MIT licensed and free. There is no paid tier, no licence key, no trial clock and no activation — every feature in this repository ships in the same open build.
 
-An optional closed-source **Emendly Pro** build ($24 one-time, 14-day free trial) adds workflow features on top of the same engine, under the extension hooks in `shell/windows/Emendly.App/Extensions/` and `docs/tasks/0018-engine-extension-hooks.md`:
-
-- Saved Prompt Library with per-prompt hotkeys
-- Visual per-app capture profile editor
-- Searchable local run history
-- Custom terminology glossary
-- Custom tone presets
-- Action chaining and multi-paragraph batch runs
-- `emendly-cli` for scripting and editor integration
-- 12 months of priority email support
-
-Pro is **also BYOK**: the $24 buys the software, not API usage, so there is no subscription and your text never passes through an Emendly server in either tier.
+If it saves you time, you can [sponsor the work on GitHub](https://github.com/sponsors/pwwang) or [buy me a coffee](https://www.buymeacoffee.com/pwwang). Donations pay for signing certificates and release hosting; they buy no features.
 
 ## Privacy
 

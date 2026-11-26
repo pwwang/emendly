@@ -55,7 +55,9 @@ All three must pass before a commit is called done.
 
 Supported actions: `proofread`, `rewrite`, `compose`, `translate`, `synonyms`.
 
-Out of scope until the shell exists: keybindings, tray UI, settings windows, auto-update, payments, team features, macOS and Linux shells.
+In scope for v1: the Windows shell (panel, tray, settings, hub), saved prompts, history, glossary, tone presets, per-app capture rules, chains and batch runs. There is no paid tier and no licensing — every feature ships in the MIT build.
+
+Out of scope for v1: team features, macOS and Linux shells.
 
 ## Tests
 

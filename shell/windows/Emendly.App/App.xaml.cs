@@ -3,8 +3,8 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
-using Emendly.App.Extensions;
 using Emendly.Capture;
+using Emendly.Core;
 using Drawing = System.Drawing;
 using Forms = System.Windows.Forms;
 
@@ -14,6 +14,10 @@ public partial class App : Application
 {
     private const string SingleInstanceMutexName = @"Local\Emendly.App.SingleInstance";
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(3);
+    private static readonly Lazy<HistoryStore> SharedHistory = new(() => new HistoryStore());
+
+    // One instance for the panel and the hub: the store rewrites the whole file from memory.
+    internal static HistoryStore History => SharedHistory.Value;
 
     private readonly ClipboardInserter _inserter = new();
 
@@ -30,12 +34,14 @@ public partial class App : Application
     private PanelWindow? _activePanel;
     private NoticeWindow? _activeNotice;
     private SettingsWindow? _settingsWindow;
+    private HubWindow? _hubWindow;
     private UpdateDialog? _updateDialog;
     private UpdateCheckResult? _pendingUpdate;
     private bool _lastBalloonWasUpdate;
     private bool _updateCheckInFlight;
     private CancellationTokenSource? _startupUpdateCts;
     private bool _shutdownAfterSettings;
+    private bool _shutdownAfterHub;
     private bool _probeInFlight;
 
     [DllImport("user32.dll", SetLastError = true)]
@@ -47,11 +53,12 @@ public partial class App : Application
         base.OnStartup(e);
 
         var openSettingsAndExit = HasFlag(e.Args, "--settings");
+        var openHubAndExit = HasFlag(e.Args, "--hub");
 
         _instanceMutex = new Mutex(initiallyOwned: true, SingleInstanceMutexName, out _ownsMutex);
         if (!_ownsMutex)
         {
-            _ = HotkeyWindow.NotifyExistingInstance(openSettings: openSettingsAndExit);
+            _ = HotkeyWindow.NotifyExistingInstance(openSettings: openSettingsAndExit, openHub: openHubAndExit);
             Shutdown(0);
             return;
         }
@@ -69,8 +76,21 @@ public partial class App : Application
             _shutdownAfterSettings = true;
             _hotkeyWindow = new HotkeyWindow();
             _hotkeyWindow.ActivateRequested += OnActivateRequested;
+        _hotkeyWindow.OpenHubRequested += (_, _) => OpenHub();
             _hotkeyWindow.OpenSettingsRequested += (_, _) => OpenSettings();
+            _hotkeyWindow.OpenHubRequested += (_, _) => OpenHub();
             OpenSettings();
+            return;
+        }
+
+        if (openHubAndExit)
+        {
+            _shutdownAfterHub = true;
+            _hotkeyWindow = new HotkeyWindow();
+            _hotkeyWindow.ActivateRequested += OnActivateRequested;
+            _hotkeyWindow.OpenSettingsRequested += (_, _) => OpenSettings();
+            _hotkeyWindow.OpenHubRequested += (_, _) => OpenHub();
+            OpenHub();
             return;
         }
 
@@ -120,6 +140,9 @@ public partial class App : Application
         var settingsItem = new Forms.ToolStripMenuItem("Settings");
         settingsItem.Click += (_, _) => OpenSettings();
 
+        var hubItem = new Forms.ToolStripMenuItem("Hub…");
+        hubItem.Click += (_, _) => OpenHub();
+
         _undoMenuItem = new Forms.ToolStripMenuItem("Undo last insert")
         {
             Enabled = false,
@@ -135,9 +158,9 @@ public partial class App : Application
         menu.Items.Add(versionItem);
         menu.Items.Add(new Forms.ToolStripSeparator());
         menu.Items.Add(settingsItem);
+        menu.Items.Add(hubItem);
         menu.Items.Add(_undoMenuItem);
         menu.Items.Add(checkUpdatesItem);
-        ExtensionHost.ApplyTrayMenu(menu);
         menu.Items.Add(new Forms.ToolStripSeparator());
         menu.Items.Add(quitItem);
 
@@ -219,6 +242,8 @@ public partial class App : Application
         _probeInFlight = true;
         try
         {
+            // Re-read so rules edited in the hub apply without a restart.
+            _captureRules = AppCaptureRules.LoadDefault();
             var outcome = await Task.Run(() => CaptureChain.CaptureWithTimeout(foreground, _captureRules, ProbeTimeout));
 
             if (outcome.TimedOut)
@@ -440,6 +465,50 @@ public partial class App : Application
         }
 
         _activePanel?.ApplySavedSettings(_transformer?.DefaultTargetLanguage);
+    }
+
+    private void OpenHub()
+    {
+        if (_hubWindow is not null)
+        {
+            if (_hubWindow.WindowState == WindowState.Minimized)
+            {
+                _hubWindow.WindowState = WindowState.Normal;
+            }
+
+            _hubWindow.Activate();
+            return;
+        }
+
+        var hub = new HubWindow();
+        _hubWindow = hub;
+        hub.Closed += (_, _) =>
+        {
+            if (ReferenceEquals(_hubWindow, hub))
+            {
+                _hubWindow = null;
+            }
+
+            if (_shutdownAfterHub)
+            {
+                _shutdownAfterHub = false;
+                Shutdown(0);
+            }
+        };
+        hub.Show();
+        hub.Activate();
+    }
+
+    private void CloseHubWindow()
+    {
+        var window = _hubWindow;
+        if (window is null)
+        {
+            return;
+        }
+
+        _hubWindow = null;
+        window.Close();
     }
 
     private void CloseSettingsWindow()
@@ -707,6 +776,7 @@ public partial class App : Application
         CloseUpdateDialog();
         _shutdownAfterSettings = false;
         CloseSettingsWindow();
+        CloseHubWindow();
 
         if (_activePanel is not null)
         {
