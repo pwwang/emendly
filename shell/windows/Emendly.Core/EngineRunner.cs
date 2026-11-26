@@ -18,6 +18,7 @@ public sealed class EngineRequest
     public string? ContextBefore { get; set; }
     public string? ContextAfter { get; set; }
     public string? SystemPrefix { get; set; }
+    public string? SystemSuffix { get; set; }
     public string? SystemOverride { get; set; }
     public string? UserTemplateOverride { get; set; }
     public IReadOnlyList<ProtocolGlossaryEntry>? Glossary { get; set; }
@@ -37,6 +38,7 @@ public sealed class EngineRequest
         ContextBefore = ContextBefore,
         ContextAfter = ContextAfter,
         SystemPrefix = SystemPrefix,
+        SystemSuffix = SystemSuffix,
         SystemOverride = SystemOverride,
         UserTemplateOverride = UserTemplateOverride,
         Glossary = Glossary,
@@ -657,6 +659,7 @@ public sealed class EngineRunner : IEngineRunner, IDisposable
             WriteOptionalString(writer, "brief", request.Brief);
             WriteOptionalString(writer, "context", request.Context);
             WriteOptionalString(writer, "system_prefix", request.SystemPrefix);
+            WriteOptionalString(writer, "system_suffix", request.SystemSuffix);
             WriteOptionalString(writer, "system_override", request.SystemOverride);
             WriteOptionalString(writer, "user_template_override", request.UserTemplateOverride);
 

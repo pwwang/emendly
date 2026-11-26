@@ -182,7 +182,7 @@ fn assemble_system_prompt(action: &Action, options: &ActionOptions) -> String {
 
     let glossary_block = options.glossary.as_deref().and_then(format_glossary);
 
-    let mut blocks: Vec<&str> = Vec::with_capacity(3);
+    let mut blocks: Vec<&str> = Vec::with_capacity(4);
     if let Some(prefix) = non_empty(options.system_prefix.as_deref()) {
         blocks.push(prefix);
     }
@@ -191,6 +191,9 @@ fn assemble_system_prompt(action: &Action, options: &ActionOptions) -> String {
     }
     if !base.is_empty() {
         blocks.push(base);
+    }
+    if let Some(suffix) = non_empty(options.system_suffix.as_deref()) {
+        blocks.push(suffix);
     }
     blocks.join("\n\n")
 }
@@ -574,6 +577,36 @@ mod tests {
         assert_eq!(rendered.system, expected);
         assert!(!rendered.system.contains("ignored"));
         assert!(rendered.system.ends_with(&base));
+    }
+
+    #[test]
+    fn appends_system_suffix_after_base_prompt() {
+        let reg = repo_registry();
+        let cfg = Config::default();
+        let base = reg
+            .render("rewrite", "Hello", &ActionOptions::default(), None, &cfg)
+            .unwrap()
+            .system;
+
+        let opts = ActionOptions {
+            system_prefix: Some("Prefix.".into()),
+            system_suffix: Some("Rewrite in a warm tone.".into()),
+            ..Default::default()
+        };
+        let rendered = reg.render("rewrite", "Hello", &opts, None, &cfg).unwrap();
+        assert_eq!(
+            rendered.system,
+            format!("Prefix.\n\n{base}\n\nRewrite in a warm tone.")
+        );
+
+        let blank_suffix = ActionOptions {
+            system_suffix: Some("  \n ".into()),
+            ..Default::default()
+        };
+        let rendered_blank = reg
+            .render("rewrite", "Hello", &blank_suffix, None, &cfg)
+            .unwrap();
+        assert_eq!(rendered_blank.system, base);
     }
 
     #[test]

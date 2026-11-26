@@ -17,6 +17,7 @@ public enum ActionOptionKind
     None,
     Context,
     Language,
+    Style,
 }
 
 public sealed record MenuAction(
@@ -42,16 +43,9 @@ public static class MenuModel
     public static readonly MenuAction Rewrite = new(
         "rewrite",
         "Rewrite",
-        "Improve clarity and flow",
+        "Rewrite in a chosen style",
         ActionKind.Replace,
-        ActionOptionKind.Context);
-
-    public static readonly MenuAction Humanize = new(
-        "humanize",
-        "Humanize",
-        "Make phrasing read more naturally",
-        ActionKind.Replace,
-        ActionOptionKind.None);
+        ActionOptionKind.Style);
 
     public static readonly MenuAction Translate = new(
         "translate",
@@ -59,13 +53,6 @@ public static class MenuModel
         "Translate to target language",
         ActionKind.Replace,
         ActionOptionKind.Language);
-
-    public static readonly MenuAction PromptOptimize = new(
-        "prompt_optimize",
-        "Prompt Optimize",
-        "Clarify a prompt for more reliable results",
-        ActionKind.Replace,
-        ActionOptionKind.None);
 
     public static readonly MenuAction Synonyms = new(
         "synonyms",
@@ -113,14 +100,12 @@ public static class MenuModel
         Proofread,
         Rewrite,
         Translate,
-        Humanize,
-        PromptOptimize,
     };
 
     private static readonly IReadOnlyList<MenuGroup> ExpandedGroups = new[]
     {
-        new MenuGroup("Improve", new[] { Proofread, Rewrite, Humanize }),
-        new MenuGroup("Change", new[] { Translate, PromptOptimize }),
+        new MenuGroup("Improve", new[] { Proofread, Rewrite }),
+        new MenuGroup("Change", new[] { Translate }),
         new MenuGroup("Words", new[] { Synonyms, Antonyms }),
         new MenuGroup("Create", new[] { Compose, Custom }),
     };
@@ -129,9 +114,7 @@ public static class MenuModel
     {
         [Proofread.Id] = Proofread,
         [Rewrite.Id] = Rewrite,
-        [Humanize.Id] = Humanize,
         [Translate.Id] = Translate,
-        [PromptOptimize.Id] = PromptOptimize,
         [Synonyms.Id] = Synonyms,
         [Antonyms.Id] = Antonyms,
         [Compose.Id] = Compose,
@@ -274,7 +257,8 @@ public static class MenuModel
     public static ActionOptionKind GetOptions(string actionId) =>
         actionId switch
         {
-            "rewrite" or "compose" => ActionOptionKind.Context,
+            "rewrite" => ActionOptionKind.Style,
+            "compose" => ActionOptionKind.Context,
             "translate" => ActionOptionKind.Language,
             _ => ActionOptionKind.None,
         };

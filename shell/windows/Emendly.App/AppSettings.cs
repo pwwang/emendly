@@ -38,6 +38,10 @@ public sealed class AppSettings
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? TargetLanguage { get; set; }
 
+    [JsonPropertyName("rewrite_style")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RewriteStyle { get; set; }
+
     [JsonPropertyName("context_enabled")]
     public Dictionary<string, bool> ContextEnabled { get; set; } = new(StringComparer.Ordinal);
 
@@ -125,6 +129,12 @@ public sealed class AppSettings
                 && !string.IsNullOrWhiteSpace(languageOverride))
             {
                 target.TargetLanguage = languageOverride.Trim();
+            }
+
+            if (TryGetString(root, "rewrite_style", out var rewriteStyle)
+                && !string.IsNullOrWhiteSpace(rewriteStyle))
+            {
+                target.RewriteStyle = rewriteStyle.Trim();
             }
 
             if (TryGetObject(root, "language", out var language)
@@ -263,6 +273,24 @@ public sealed class AppSettings
 
         Language.DefaultTarget = trimmed;
         TargetLanguage = trimmed;
+        Save();
+    }
+
+    public string GetRewriteStyle()
+    {
+        var style = RewriteStyles.FindById(RewriteStyle);
+        return style is not null ? style.Id : RewriteStyles.Default.Id;
+    }
+
+    public void SetRewriteStyle(string styleId)
+    {
+        var style = RewriteStyles.FindById(styleId);
+        if (style is null)
+        {
+            return;
+        }
+
+        RewriteStyle = style.Id;
         Save();
     }
 

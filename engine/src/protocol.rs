@@ -116,6 +116,8 @@ pub struct ActionOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system_prefix: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_suffix: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub system_override: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_template_override: Option<String>,
@@ -344,6 +346,7 @@ mod tests {
         assert_eq!(options.target_lang, None);
         assert_eq!(options.instruction, None);
         assert_eq!(options.system_prefix, None);
+        assert_eq!(options.system_suffix, None);
         assert_eq!(options.system_override, None);
         assert_eq!(options.user_template_override, None);
         assert_eq!(options.glossary, None);
@@ -352,7 +355,7 @@ mod tests {
     #[test]
     fn parses_extension_options_and_reload_request() {
         let req = parse_request(
-            r#"{"id":"g1","type":"actions.run","action":"translate","text":"hi","options":{"system_prefix":"Prefer plain English.","system_override":"You are terse.","user_template_override":"{{text}}","glossary":[{"source":"Emendly","do_not_translate":true},{"source":"engine","target":"motor","note":"product term"},{"source":"shell","target":"casca"}]}}"#,
+            r#"{"id":"g1","type":"actions.run","action":"translate","text":"hi","options":{"system_prefix":"Prefer plain English.","system_suffix":"Keep it concise.","system_override":"You are terse.","user_template_override":"{{text}}","glossary":[{"source":"Emendly","do_not_translate":true},{"source":"engine","target":"motor","note":"product term"},{"source":"shell","target":"casca"}]}}"#,
         )
         .unwrap();
         let RequestKind::ActionsRun { options, .. } = req.kind else {
@@ -362,6 +365,7 @@ mod tests {
             options.system_prefix.as_deref(),
             Some("Prefer plain English.")
         );
+        assert_eq!(options.system_suffix.as_deref(), Some("Keep it concise."));
         assert_eq!(options.system_override.as_deref(), Some("You are terse."));
         assert_eq!(options.user_template_override.as_deref(), Some("{{text}}"));
         let glossary = options.glossary.unwrap();
@@ -405,6 +409,7 @@ mod tests {
         let options = &value["options"];
         for key in [
             "system_prefix",
+            "system_suffix",
             "system_override",
             "user_template_override",
             "glossary",

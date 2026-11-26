@@ -91,7 +91,7 @@ public partial class HubWindow : Window
     {
         ProfileStrategyCombo.ItemsSource = AppProfilesStore.ValidStrategies;
         ProfileStrategyCombo.SelectedIndex = 0;
-        ChainStepActionCombo.ItemsSource = new[] { "proofread", "rewrite", "translate", "humanize", "compose", "prompt_optimize" };
+        ChainStepActionCombo.ItemsSource = new[] { "proofread", "rewrite", "translate", "humanize", "compose" };
         ChainStepActionCombo.SelectedIndex = 0;
         BatchActionCombo.ItemsSource = new[] { "proofread", "rewrite", "translate", "humanize", "Selected Chain" };
         BatchActionCombo.SelectedIndex = 0;

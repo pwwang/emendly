@@ -70,6 +70,7 @@
     <Setter Property="MaxDropDownHeight" Value="260" />
     <Setter Property="IsEditable" Value="True" />
     <Setter Property="IsTextSearchEnabled" Value="False" />
+    <Setter Property="Tag" Value="Type or choose a language" />
     <Setter Property="Cursor" Value="Hand" />
     <Setter Property="FocusVisualStyle" Value="{x:Null}" />
     <Setter Property="SnapsToDevicePixels" Value="True" />
@@ -108,7 +109,7 @@
                          Visibility="Collapsed" />
                 <TextBlock x:Name="Watermark"
                            Grid.Column="0"
-                           Text="Type or choose a language"
+                           Text="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}, TargetNullValue='Type or choose a language'}"
                            Foreground="#9CA3AF"
                            Margin="{TemplateBinding Padding}"
                            VerticalAlignment="Center"

@@ -45,7 +45,7 @@ public partial class PanelWindow : Window
         Button? OptionButton,
         Path? ContextGlyphPath,
         Path? ContextSlashPath,
-        TextBlock? LanguageCodeText,
+        TextBlock? OptionCodeText,
         MenuAction Action);
 
     private sealed record RetryState(
@@ -93,6 +93,10 @@ public partial class PanelWindow : Window
     private bool _languagePickedInRun;
     private bool _languageDropdownOpen;
     private bool _languageDropdownCommitted;
+    private string _rewriteStyle = RewriteStyles.Default.Id;
+    private bool _stylePickedInRun;
+    private bool _styleDropdownOpen;
+    private bool _styleDropdownCommitted;
     private string? _promptActionId;
     private string? _lastPromptActionId;
     private bool _promptForceOptionsOff;
@@ -141,6 +145,7 @@ public partial class PanelWindow : Window
         _transformer = transformer;
         _inserter = inserter;
         _targetLanguage = settings.GetEffectiveTargetLanguage(transformer.DefaultTargetLanguage);
+        _rewriteStyle = settings.GetRewriteStyle();
 
         if (!string.IsNullOrWhiteSpace(unsupportedReason))
         {
@@ -210,6 +215,13 @@ public partial class PanelWindow : Window
         {
             LanguageDropdown.Focus();
             Keyboard.Focus(LanguageDropdown);
+            return;
+        }
+
+        if (_styleDropdownOpen)
+        {
+            StyleDropdown.Focus();
+            Keyboard.Focus(StyleDropdown);
             return;
         }
 
@@ -514,7 +526,7 @@ public partial class PanelWindow : Window
         Button? optionButton = null;
         Path? contextGlyphPath = null;
         Path? contextSlashPath = null;
-        TextBlock? languageCodeText = null;
+        TextBlock? optionCodeText = null;
 
         if (action.Options == ActionOptionKind.Context)
         {
@@ -576,7 +588,7 @@ public partial class PanelWindow : Window
                 VerticalAlignment = VerticalAlignment.Top,
             };
 
-            languageCodeText = new TextBlock
+            optionCodeText = new TextBlock
             {
                 Foreground = IconAccentBrush,
                 FontSize = 9,
@@ -591,9 +603,9 @@ public partial class PanelWindow : Window
             iconGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(9) });
             iconGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(9) });
             Grid.SetRow(globePath, 0);
-            Grid.SetRow(languageCodeText, 1);
+            Grid.SetRow(optionCodeText, 1);
             iconGrid.Children.Add(globePath);
-            iconGrid.Children.Add(languageCodeText);
+            iconGrid.Children.Add(optionCodeText);
 
             optionButton = new Button
             {
@@ -603,6 +615,54 @@ public partial class PanelWindow : Window
                 Visibility = Visibility.Collapsed,
             };
             optionButton.Click += OnLanguageChipClick;
+
+            Grid.SetColumn(optionButton, 1);
+            rowGrid.Children.Add(optionButton);
+        }
+        else if (action.Options == ActionOptionKind.Style)
+        {
+            var stylePath = new Path
+            {
+                Data = (Geometry)FindResource("StyleIconGeometry"),
+                Width = 9,
+                Height = 9,
+                Stretch = Stretch.Uniform,
+                Stroke = IconAccentBrush,
+                StrokeThickness = 0.9,
+                StrokeStartLineCap = PenLineCap.Round,
+                StrokeEndLineCap = PenLineCap.Round,
+                StrokeLineJoin = PenLineJoin.Round,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Top,
+            };
+
+            optionCodeText = new TextBlock
+            {
+                Foreground = IconAccentBrush,
+                FontSize = 7,
+                FontWeight = FontWeights.SemiBold,
+                LineHeight = 9,
+                LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Bottom,
+            };
+
+            var iconGrid = new Grid { Width = 18, Height = 18 };
+            iconGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(9) });
+            iconGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(9) });
+            Grid.SetRow(stylePath, 0);
+            Grid.SetRow(optionCodeText, 1);
+            iconGrid.Children.Add(stylePath);
+            iconGrid.Children.Add(optionCodeText);
+
+            optionButton = new Button
+            {
+                Style = (Style)FindResource("OptionIconButtonStyle"),
+                Margin = new Thickness(8, 0, 2, 0),
+                Content = iconGrid,
+                Visibility = Visibility.Collapsed,
+            };
+            optionButton.Click += OnStyleChipClick;
 
             Grid.SetColumn(optionButton, 1);
             rowGrid.Children.Add(optionButton);
@@ -622,7 +682,7 @@ public partial class PanelWindow : Window
 
         row.MouseEnter += (_, _) =>
         {
-            if (!_languageDropdownOpen && _selectedIndex != index)
+            if (!_languageDropdownOpen && !_styleDropdownOpen && _selectedIndex != index)
             {
                 SelectIndex(index);
             }
@@ -639,7 +699,7 @@ public partial class PanelWindow : Window
         };
 
         _visibleActions.Add(action);
-        _actionRows.Add(new ActionRowElements(row, optionButton, contextGlyphPath, contextSlashPath, languageCodeText, action));
+        _actionRows.Add(new ActionRowElements(row, optionButton, contextGlyphPath, contextSlashPath, optionCodeText, action));
         ActionListPanel.Children.Add(row);
     }
 
@@ -817,9 +877,21 @@ public partial class PanelWindow : Window
         {
             entry.OptionButton.IsEnabled = true;
             entry.OptionButton.ToolTip = $"Target language: {_targetLanguage}";
-            if (entry.LanguageCodeText is not null)
+            if (entry.OptionCodeText is not null)
             {
-                entry.LanguageCodeText.Text = MenuModel.GetLanguageCode(_targetLanguage);
+                entry.OptionCodeText.Text = MenuModel.GetLanguageCode(_targetLanguage);
+            }
+
+            return;
+        }
+
+        if (entry.Action.Options == ActionOptionKind.Style)
+        {
+            entry.OptionButton.IsEnabled = true;
+            entry.OptionButton.ToolTip = $"Rewrite style: {RewriteStyles.LabelOf(_rewriteStyle)}";
+            if (entry.OptionCodeText is not null)
+            {
+                entry.OptionCodeText.Text = RewriteStyles.ShortLabelOf(_rewriteStyle);
             }
         }
     }
@@ -956,7 +1028,7 @@ public partial class PanelWindow : Window
 
         if (_optionsFocused)
         {
-            parts.Add(_highlighted?.Options == ActionOptionKind.Language
+            parts.Add(_highlighted?.Options is ActionOptionKind.Language or ActionOptionKind.Style
                 ? "Enter/Space picks · Esc back"
                 : "Space toggles · Esc back");
         }
@@ -1021,6 +1093,9 @@ public partial class PanelWindow : Window
             case ActionOptionKind.Language:
                 OpenLanguageDropdown();
                 break;
+            case ActionOptionKind.Style:
+                OpenStyleDropdown();
+                break;
         }
     }
 
@@ -1051,10 +1126,12 @@ public partial class PanelWindow : Window
             return;
         }
 
-        var languages = MenuModel.GetLanguages(_targetLanguage);
-        LanguageDropdown.ItemsSource = languages;
-        LanguageDropdown.Text = _targetLanguage;
-        LanguageDropdown.SelectedIndex = MenuModel.FindLanguageIndex(languages, _targetLanguage);
+        if (_styleDropdownOpen)
+        {
+            CloseStyleDropdown(commit: false);
+        }
+
+        ShowLanguages();
 
         _languageDropdownOpen = true;
         _languageDropdownCommitted = false;
@@ -1153,29 +1230,183 @@ public partial class PanelWindow : Window
 
     public void ApplySavedSettings(string? engineDefaultTargetLanguage)
     {
+        if (_closing)
+        {
+            return;
+        }
+
+        var changed = false;
+
         // A language chosen in the panel wins over the saved default for this run.
-        if (_closing || _languagePickedInRun)
+        if (!_languagePickedInRun)
+        {
+            var language = _settings.GetEffectiveTargetLanguage(engineDefaultTargetLanguage);
+            if (!string.Equals(language, _targetLanguage, StringComparison.Ordinal))
+            {
+                _targetLanguage = language;
+                changed = true;
+
+                if (_languageDropdownOpen)
+                {
+                    ShowLanguages();
+                }
+            }
+        }
+
+        // A style chosen in the panel likewise wins over the saved default.
+        if (!_stylePickedInRun)
+        {
+            var style = _settings.GetRewriteStyle();
+            if (!string.Equals(style, _rewriteStyle, StringComparison.Ordinal))
+            {
+                _rewriteStyle = style;
+                changed = true;
+
+                if (_styleDropdownOpen)
+                {
+                    ShowStyles();
+                }
+            }
+        }
+
+        if (changed)
+        {
+            UpdateRowOptions();
+        }
+    }
+
+    private void ShowLanguages()
+    {
+        var languages = MenuModel.GetLanguages(_targetLanguage);
+        LanguageDropdown.ItemsSource = languages;
+        LanguageDropdown.Text = _targetLanguage;
+        LanguageDropdown.SelectedIndex = MenuModel.FindLanguageIndex(languages, _targetLanguage);
+    }
+
+    // ---- Style dropdown ----------------------------------------------------
+
+    private void OpenStyleDropdown()
+    {
+        if (_closing || _stage != PanelStage.ChooseAction)
         {
             return;
         }
 
-        var language = _settings.GetEffectiveTargetLanguage(engineDefaultTargetLanguage);
-        if (string.Equals(language, _targetLanguage, StringComparison.Ordinal))
+        if (_styleDropdownOpen)
         {
+            CloseStyleDropdown(commit: false);
             return;
         }
-
-        _targetLanguage = language;
 
         if (_languageDropdownOpen)
         {
-            var languages = MenuModel.GetLanguages(_targetLanguage);
-            LanguageDropdown.ItemsSource = languages;
-            LanguageDropdown.Text = _targetLanguage;
-            LanguageDropdown.SelectedIndex = MenuModel.FindLanguageIndex(languages, _targetLanguage);
+            CloseLanguageDropdown(commit: false);
         }
 
-        UpdateRowOptions();
+        ShowStyles();
+
+        _styleDropdownOpen = true;
+        _styleDropdownCommitted = false;
+
+        PositionStyleDropdown();
+        StyleDropdownOverlay.Visibility = Visibility.Visible;
+        StyleDropdownOverlay.UpdateLayout();
+        PositionStyleDropdown();
+
+        _ = Dispatcher.InvokeAsync(() =>
+        {
+            if (_closing || !_styleDropdownOpen || _stage != PanelStage.ChooseAction)
+            {
+                return;
+            }
+
+            StyleDropdown.Focus();
+            Keyboard.Focus(StyleDropdown);
+            StyleDropdown.IsDropDownOpen = true;
+            if (StyleDropdown.Template.FindName("PART_EditableTextBox", StyleDropdown) is TextBox editor)
+            {
+                editor.SelectAll();
+            }
+        }, DispatcherPriority.Input);
+    }
+
+    private void ShowStyles()
+    {
+        StyleDropdown.ItemsSource = RewriteStyles.Labels;
+        StyleDropdown.Text = RewriteStyles.LabelOf(_rewriteStyle);
+        StyleDropdown.SelectedIndex = RewriteStyles.FindIndex(_rewriteStyle);
+    }
+
+    private void PositionStyleDropdown()
+    {
+        var anchorButton = GetSelectedOptionButton();
+        if (anchorButton is null)
+        {
+            return;
+        }
+
+        var bottomRight = anchorButton.TranslatePoint(
+            new Point(anchorButton.ActualWidth, anchorButton.ActualHeight),
+            PanelRootGrid);
+
+        var rootWidth = PanelRootGrid.ActualWidth;
+        var rootHeight = PanelRootGrid.ActualHeight;
+        var dropdownWidth = StyleDropdown.ActualWidth > 0 ? StyleDropdown.ActualWidth : StyleDropdown.Width;
+        var dropdownHeight = StyleDropdown.ActualHeight > 0 ? StyleDropdown.ActualHeight : 30.0;
+
+        var left = bottomRight.X - dropdownWidth;
+        left = rootWidth > 0
+            ? Math.Clamp(left, 0, Math.Max(0, rootWidth - dropdownWidth))
+            : Math.Max(0, left);
+
+        var top = bottomRight.Y + 4;
+        if (rootHeight > 0)
+        {
+            top = Math.Clamp(top, 0, Math.Max(0, rootHeight - dropdownHeight));
+        }
+
+        Canvas.SetLeft(StyleDropdown, left);
+        Canvas.SetTop(StyleDropdown, top);
+    }
+
+    private void CloseStyleDropdown(bool commit, string? value = null)
+    {
+        if (!_styleDropdownOpen)
+        {
+            return;
+        }
+
+        _styleDropdownOpen = false;
+        var shouldCommit = commit;
+        _styleDropdownCommitted = false;
+
+        var chosen = shouldCommit
+            ? (value ?? (StyleDropdown.SelectedItem as string) ?? StyleDropdown.Text)?.Trim()
+            : null;
+
+        if (StyleDropdown.IsDropDownOpen)
+        {
+            StyleDropdown.IsDropDownOpen = false;
+        }
+
+        StyleDropdownOverlay.Visibility = Visibility.Collapsed;
+
+        var style = string.IsNullOrEmpty(chosen) ? null : RewriteStyles.FindByIdOrLabel(chosen);
+        if (style is not null)
+        {
+            _rewriteStyle = style.Id;
+            _stylePickedInRun = true;
+            _settings.SetRewriteStyle(style.Id);
+            UpdateRowOptions();
+        }
+
+        _optionsFocused = false;
+        UpdateMenuHints();
+
+        if (IsActive && !_closing)
+        {
+            FocusStageTarget();
+        }
     }
 
     // ---- Actions -----------------------------------------------------------
@@ -1318,6 +1549,25 @@ public partial class PanelWindow : Window
                 logParts.Add("lang=default");
             }
         }
+        else if (action.Options == ActionOptionKind.Style)
+        {
+            var style = RewriteStyles.FindById(_rewriteStyle) ?? RewriteStyles.Default;
+
+            if (!forceOptionsOff)
+            {
+                options["system_suffix"] = style.Instructions;
+                if (style.Id == "prompt_optimize")
+                {
+                    options["user_template_override"] = "Prompt to improve:\n{{text}}";
+                }
+
+                logParts.Add($"style={style.Id}");
+            }
+            else
+            {
+                logParts.Add("style=default");
+            }
+        }
 
         log = logParts.Count == 0 ? "none" : string.Join(",", logParts);
         return options;
@@ -1379,6 +1629,10 @@ public partial class PanelWindow : Window
         _languageDropdownCommitted = false;
         LanguageDropdown.IsDropDownOpen = false;
         LanguageDropdownOverlay.Visibility = Visibility.Collapsed;
+        _styleDropdownOpen = false;
+        _styleDropdownCommitted = false;
+        StyleDropdown.IsDropDownOpen = false;
+        StyleDropdownOverlay.Visibility = Visibility.Collapsed;
 
         // Every attempt, including a retry, logs its own action line.
         ShellLogger.LogActionOptions(state.Action.Id, _targetWindow.ProcessName, state.OptionsLog);
@@ -1777,6 +2031,10 @@ public partial class PanelWindow : Window
         _languageDropdownCommitted = false;
         LanguageDropdown.IsDropDownOpen = false;
         LanguageDropdownOverlay.Visibility = Visibility.Collapsed;
+        _styleDropdownOpen = false;
+        _styleDropdownCommitted = false;
+        StyleDropdown.IsDropDownOpen = false;
+        StyleDropdownOverlay.Visibility = Visibility.Collapsed;
         _resultText = string.Empty;
         PreviewBox.Text = string.Empty;
         _closing = true;
@@ -1792,6 +2050,12 @@ public partial class PanelWindow : Window
         if (_languageDropdownOpen || LanguageDropdown.IsDropDownOpen)
         {
             HandleLanguageDropdownKey(e);
+            return;
+        }
+
+        if (_styleDropdownOpen || StyleDropdown.IsDropDownOpen)
+        {
+            HandleStyleDropdownKey(e);
             return;
         }
 
@@ -2196,6 +2460,32 @@ public partial class PanelWindow : Window
         CloseLanguageDropdown(commit: chosen is not null, value: chosen);
     }
 
+    private void HandleStyleDropdownKey(KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape)
+        {
+            e.Handled = true;
+            CloseStyleDropdown(commit: false);
+            return;
+        }
+
+        if (e.Key == Key.Tab)
+        {
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key != Key.Enter)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        var typed = StyleDropdown.Text?.Trim();
+        var chosen = RewriteStyles.FindByIdOrLabel(typed)?.Label;
+        CloseStyleDropdown(commit: chosen is not null, value: chosen);
+    }
+
     private static int DigitFromKey(Key key) =>
         key switch
         {
@@ -2321,6 +2611,14 @@ public partial class PanelWindow : Window
         }
     }
 
+    private void OnStyleChipClick(object sender, RoutedEventArgs e)
+    {
+        if (_stage == PanelStage.ChooseAction)
+        {
+            OpenStyleDropdown();
+        }
+    }
+
     private void OnContextPreviewToggleClick(object sender, MouseButtonEventArgs e)
     {
         _contextPreviewExpanded = !_contextPreviewExpanded;
@@ -2365,6 +2663,30 @@ public partial class PanelWindow : Window
             && ItemsControl.ContainerFromElement(LanguageDropdown, source) is ComboBoxItem)
         {
             _languageDropdownCommitted = true;
+        }
+    }
+
+    private void OnStyleDropdownClosed(object? sender, EventArgs e)
+    {
+        if (!_styleDropdownOpen)
+        {
+            return;
+        }
+
+        CloseStyleDropdown(commit: _styleDropdownCommitted);
+    }
+
+    private void OnStyleDropdownPreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!_styleDropdownOpen)
+        {
+            return;
+        }
+
+        if (e.OriginalSource is DependencyObject source
+            && ItemsControl.ContainerFromElement(StyleDropdown, source) is ComboBoxItem)
+        {
+            _styleDropdownCommitted = true;
         }
     }
 
