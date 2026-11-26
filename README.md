@@ -151,7 +151,7 @@ The key is read from the environment and never written to disk. Settings live in
 
 Emendly is MIT licensed and free. There is no paid tier, no licence key, no trial clock and no activation — every feature in this repository ships in the same open build.
 
-If it saves you time, you can [sponsor the work on GitHub](https://github.com/sponsors/pwwang) or [buy me a coffee](https://www.buymeacoffee.com/pwwang). Donations pay for signing certificates and release hosting; they buy no features.
+If it saves you time, you can [sponsor the work on GitHub](https://github.com/sponsors/pwwang). Donations pay for signing certificates and release hosting; they buy no features.
 
 ## Privacy
 
