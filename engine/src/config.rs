@@ -77,7 +77,7 @@ impl Default for Config {
             provider: ProviderConfig {
                 base_url: "https://api.openai.com/v1".into(),
                 model: "gpt-5-mini".into(),
-                timeout_ms: 20_000,
+                timeout_ms: 120_000,
             },
             language: LanguageConfig {
                 ui: "en".into(),
@@ -218,7 +218,7 @@ mod tests {
     fn loads_defaults_toml_and_json() {
         let def = Config::default();
         assert_eq!(def.provider.model, "gpt-5-mini");
-        assert_eq!(def.provider.timeout_ms, 20_000);
+        assert_eq!(def.provider.timeout_ms, 120_000);
         assert_eq!(def.language.default_target, "German");
 
         let toml_path = temp_path("toml");

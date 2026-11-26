@@ -18,8 +18,12 @@ pub struct CancelToken {
 
 impl CancelToken {
     pub fn new(timeout_ms: u64) -> Self {
+        // timeout_global covers the whole exchange including the streamed body, which
+        // would cap total generation time. What we actually want is an inactivity
+        // timeout: no total budget, but a stalled socket still fails.
         let cfg = ureq::Agent::config_builder()
-            .timeout_global(Some(Duration::from_millis(timeout_ms)))
+            .timeout_global(None)
+            .timeout_per_read(Some(Duration::from_millis(timeout_ms)))
             .build();
         Self {
             cancelled: Arc::new(AtomicBool::new(false)),
