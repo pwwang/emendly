@@ -1,12 +1,1 @@
-# Sponsor button shown on the repository page.
-# Docs: https://docs.github.com/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/displaying-a-sponsor-button-in-your-repository
-#
-# Emendly has no paid tier: every feature ships in this MIT build. Sponsorship
-# covers the costs of keeping it signed and downloadable, listed in SPONSORS.md.
-
 github: pwwang
-
-# Uncomment and fill once an account exists; each entry becomes an extra button.
-# ko_fi: your-handle
-# buy_me_a_coffee: your-handle
-# custom: ["https://emendly.dev/support"]
