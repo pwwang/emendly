@@ -322,8 +322,11 @@ public sealed class AppSettings
             return bundledBeside;
         }
 
-        return ResolveRepoEngine(baseDir, "debug")
-            ?? ResolveRepoEngine(baseDir, "release");
+        // Prefer the release build: it is what ships, and a dev debug binary left in
+        // target/debug goes stale silently. Ordering debug first meant a fixed engine
+        // sat unused while the app kept launching a two-day-old executable.
+        return ResolveRepoEngine(baseDir, "release")
+            ?? ResolveRepoEngine(baseDir, "debug");
     }
 
     private static string? ResolveRepoEngine(string baseDir, string profile)
