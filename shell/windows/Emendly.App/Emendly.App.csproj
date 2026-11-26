@@ -9,7 +9,7 @@
     <Nullable>enable</Nullable>
     <AssemblyName>Emendly.App</AssemblyName>
     <RootNamespace>Emendly.App</RootNamespace>
-    <Version>0.1.1</Version>
+    <Version>0.1.2</Version>
     <FileVersion Condition="'$(FileVersion)' == ''">$([System.Text.RegularExpressions.Regex]::Replace('$(Version)', '[-+].*$', '')).0</FileVersion>
     <InformationalVersion Condition="'$(InformationalVersion)' == ''">$(Version)</InformationalVersion>
     <ApplicationIcon>Assets\emendly.ico</ApplicationIcon>

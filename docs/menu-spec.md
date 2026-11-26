@@ -28,7 +28,7 @@ Shown when the panel opens. Number keys follow the order below.
 |---|---|---|
 | No selection | Compose, Custom Prompt | 1, 2 |
 | Single word | Proofread, Translate, Synonyms | 1, 2, 3 |
-| Multiple words | Proofread, Rewrite, Translate, Prompt Optimize | 1, 2, 3, 4 |
+| Multiple words | Proofread, Rewrite, Translate | 1, 2, 3 |
 
 ## 3. Items behind "More"
 
@@ -37,9 +37,9 @@ Shown when the panel opens. Number keys follow the order below.
 | State | More items, in order | Enabled | Disabled reason |
 |---|---|---|---|
 | No selection | Synonyms, Antonyms, Translate | when the caret sits inside a word | "place the caret inside a word" |
-| No selection | Proofread, Rewrite, Prompt Optimize | never | "select text first" |
+| No selection | Compose, Custom Prompt | never | "select text first" |
 | Single word | Antonyms | always | — |
-| Single word | Rewrite, Compose, Prompt Optimize, Custom Prompt | always | — |
+| Single word | Proofread, Translate, Synonyms | always | — |
 | Multiple words | Synonyms, Antonyms | always, applied to the word under the caret, else the first word | "place the caret on a word" |
 | Multiple words | Compose, Custom Prompt | always | — |
 
@@ -82,7 +82,7 @@ The button label follows the field: `Replace` when editable, `Copy` when read-on
 
 | Case | Behaviour |
 |---|---|
-| Selection over 5,000 characters | Proofread and Rewrite allowed after a confirmation; Compose and Prompt Optimize disabled with "selection too long" |
+| Selection over 5,000 characters | Proofread and Rewrite allowed after a confirmation; Compose disabled with "selection too long" |
 | Selection spans paragraphs | Treated as multiple words; context is taken from the first and last sentences only |
 | Caret in a URL or code | Word under caret resolves as usual; no special casing in v1 |
 | Non-text selection | All actions disabled, notice "no text selected" |
@@ -96,11 +96,11 @@ The button label follows the field: `Replace` when editable, `Copy` when read-on
   "defaults": {
     "none":        ["compose", "custom_prompt"],
     "single_word": ["proofread", "translate", "synonyms"],
-    "multi_word":  ["proofread", "rewrite", "translate", "prompt_optimize"]
+    "multi_word":  ["proofread", "rewrite", "translate"]
   },
   "more": {
-    "none":        ["synonyms", "antonyms", "translate", "proofread", "rewrite", "prompt_optimize"],
-    "single_word": ["antonyms", "rewrite", "compose", "prompt_optimize", "custom_prompt"],
+    "none":        ["compose", "custom"],
+    "single_word": ["proofread", "translate", "synonyms"],
     "multi_word":  ["synonyms", "antonyms", "compose", "custom_prompt"]
   },
   "options": {
@@ -111,4 +111,4 @@ The button label follows the field: `Replace` when editable, `Copy` when read-on
 }
 ```
 
-The action ids must match the engine registry: `proofread`, `rewrite`, `compose`, `translate`, `synonyms`. `prompt_optimize`, `antonyms` and `custom_prompt` need either a new engine action or a composed prompt; that is a separate task.
+The action ids must match the engine registry: `proofread`, `rewrite`, `compose`, `translate`, `synonyms`, `antonyms`, `custom`. `humanize` and `prompt_optimize` remain in the registry only so saved chains and older requests keep working; the menu reaches them as rewrite styles instead.

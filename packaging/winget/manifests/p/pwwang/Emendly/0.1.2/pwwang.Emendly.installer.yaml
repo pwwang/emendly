@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
 
 PackageIdentifier: pwwang.Emendly
-PackageVersion: 0.1.1
+PackageVersion: 0.1.2
 InstallerLocale: en-US
 InstallerType: inno
 Scope: user
@@ -16,7 +16,8 @@ UpgradeBehavior: install
 ReleaseDate: 2026-11-26
 Installers:
   - Architecture: x64
-    InstallerUrl: https://github.com/pwwang/emendly/releases/download/v0.1.1/Emendly-v0.1.1-win-x64-setup.exe
-    InstallerSha256: 490B63CC169540B5CA0D295D8084549962D900DCEB3E2F3809621B568E9AEC33
+    InstallerUrl: https://github.com/pwwang/emendly/releases/download/v0.1.2/Emendly-v0.1.2-win-x64-setup.exe
+    # PLACEHOLDER: set from the released asset with packaging/winget/update-manifest.py --installer
+    InstallerSha256: 0000000000000000000000000000000000000000000000000000000000000000
 ManifestType: installer
 ManifestVersion: 1.6.0

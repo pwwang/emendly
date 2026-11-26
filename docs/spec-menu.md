@@ -26,8 +26,7 @@ Classification runs on the trimmed selection. The replacement still uses the unt
 | `rewrite` | Rewrite | Replace, has options | passage |
 | `compose` | Compose | Insert, has options | empty |
 | `translate` | Translate | Replace, has options | word, passage |
-| `prompt_optimize` | Prompt Optimize | Replace | passage |
-| `humanize` | Humanize | Replace | passage |
+| `custom` | Custom Prompt | Custom | anywhere |
 | `synonyms` | Synonyms | Reference list | word |
 | `antonyms` | Antonyms | Reference list | none |
 | `custom` | Custom Prompt… | Replace or insert, free text | empty |
@@ -42,13 +41,13 @@ Default view, in this order:
 |---|---|---|
 | `empty` | Compose, Custom Prompt… | 1, 2 |
 | `word` | Proofread, Translate, Synonyms | 1, 2, 3 |
-| `passage` | Proofread, Rewrite, Translate, Humanize, Prompt Optimize | 1 to 5 |
+| `passage` | Proofread, Rewrite, Translate | 1 to 3 |
 
 Everything else sits under **More actions**, opened with `Tab` or the `More…` row, and keeps the grouping below:
 
 ```
-Improve      Proofread · Rewrite · Humanize
-Change       Translate · Prompt Optimize
+Improve      Proofread · Rewrite
+Change       Translate
 Words        Synonyms · Antonyms
 Create       Compose · Custom Prompt…
 ```
@@ -65,6 +64,7 @@ Options sit on one row under the highlighted item. `Tab` moves focus into the ro
 
 | Action | Option | Control | Default | Stored |
 |---|---|---|---|---|
+| Rewrite | Writing style | Dropdown anchored to the row: 11 styles | Improve | Global, persists |
 | Rewrite | Use context | Toggle chip `Context: on/off` | On | Per action, persists |
 | Compose | Use context | Toggle chip `Context: on/off` | On | Per action, persists |
 | Translate | Target language | Chip showing the language, `Space` cycles, `Enter` opens a searchable list | `language.default_target` from config | Global, persists |
@@ -117,7 +117,8 @@ A read-only selection keeps every default item. Output changes:
 
 ## 8. Engine contract additions
 
-New actions: `prompt_optimize`, `humanize`, `antonyms`, `custom`.
+New actions: `antonyms`, `custom`. `humanize` and `prompt_optimize` are not top-level actions:
+they are two of the eleven rewrite styles, applied through `system_suffix`.
 
 New request fields under `options`:
 

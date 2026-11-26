@@ -20,7 +20,7 @@ Every request is one line with an `id` and a `type`.
 {"id":"r3","type":"config.get"}
 {"id":"r4","type":"config.set","patch":{"model":"gpt-5-mini"}}
 {"id":"r5","type":"actions.run","action":"proofread","text":"their going too the store"}
-{"id":"r6","type":"actions.run","action":"rewrite","text":"We need this by Friday.","options":{"tone":"professional"}}
+{"id":"r6","type":"actions.run","action":"rewrite","text":"We need this by Friday.","options":{"system_suffix":"Rewrite the text in a polished professional workplace register without slang or exclamation marks."}}
 {"id":"r7","type":"actions.run","action":"translate","text":"Good morning","options":{"target_lang":"German"}}
 {"id":"r8","type":"actions.run","action":"compose","text":"","options":{"brief":"Decline the meeting politely, offer Tuesday","context":"Email to a vendor"}}
 {"id":"r9","type":"cancel","target":"r5"}
@@ -36,11 +36,12 @@ Rules:
 
 ### Extension options
 
-`actions.run` accepts four optional keys inside `options`. All are additive; a request that omits them behaves exactly as before.
+`actions.run` accepts five optional keys inside `options`. All are additive; a request that omits them behaves exactly as before.
 
 | Key | Type | Effect |
 |---|---|---|
 | `system_prefix` | string | Prepended to the action's system prompt, separated by a blank line. Use it for tone presets or caller-supplied instructions. |
+| `system_suffix` | string | Appended after the action's system prompt, separated by a blank line. Use it to adjust the instruction without replacing it — this is how rewrite styles are applied. |
 | `system_override` | string | Replaces the action's system prompt entirely. Blank strings are ignored. |
 | `user_template_override` | string | Replaces the action's `user_template`. Supports the same placeholders: `{{text}}`, `{{tone}}`, `{{target_lang}}`, `{{brief}}`, `{{instruction}}`, `{{context}}`. |
 | `glossary` | array | Terminology rules, rendered into the system prompt. |

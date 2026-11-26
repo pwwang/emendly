@@ -30,7 +30,8 @@ Select a sentence in any app, press **Ctrl+Alt+E**, and Emendly offers the actio
 
 - **System-wide, not browser-only.** Emendly reads the focused field through UI Automation, Scintilla messages or the clipboard, with per-app rules for the apps that hide their text from the accessibility tree.
 - **On demand by design.** No background scanning, no keystroke logging, no suggestions popping up while you type.
-- **The menu fits the selection.** One word gets proofreading and synonyms; a passage gets rewrite and translation; an empty field gets compose. Nine actions in total.
+- **The menu fits the selection.** One word gets proofreading and synonyms; a passage gets rewrite and translation; an empty field gets compose. Seven actions in total.
+- **Eleven rewrite styles.** Improve, Humanize, Professional, Academic, Streamline, Creative, Simplify, Friendly, Confident, Diplomatic and Prompt Optimize, pickable on the Rewrite row and remembered between runs.
 - **Bring your own model.** Any OpenAI-compatible endpoint, including a local Ollama or LM Studio server, with your own key.
 - **A hub for the workflow features.** Saved prompts with per-prompt hotkeys, local run history, a terminology glossary, tone presets, per-app capture rules, action chains and multi-paragraph batch runs — all in the same MIT app, opened from the tray.
 
@@ -39,8 +40,8 @@ Select a sentence in any app, press **Ctrl+Alt+E**, and Emendly offers the actio
 <table>
   <tr>
     <td align="center" width="50%">
-      <img src="docs/media/menu.png" alt="Menu with five passage actions" /><br />
-      <sub><b>The menu fits the selection.</b><br />A passage gets five actions; a single word gets three.</sub>
+      <img src="docs/media/menu.png" alt="Expanded action menu grouped by Improve, Change, Words, Create" /><br />
+      <sub><b>The menu fits the selection.</b><br />A passage gets three actions; a single word gets three.</sub>
     </td>
     <td align="center" width="50%">
       <img src="docs/media/streaming.png" alt="Streaming a proofread result" /><br />
@@ -57,16 +58,20 @@ Select a sentence in any app, press **Ctrl+Alt+E**, and Emendly offers the actio
       <sub><b>Shortcut, language, endpoint, model.</b><br />Set the hotkey by pressing it, not by typing its name.</sub>
     </td>
   </tr>
+  <tr>
+    <td align="center" colspan="2">
+      <img src="docs/media/rewrite-styles.png" alt="Rewrite style dropdown listing Improve, Humanize, Professional, Academic, Streamline, Creative, Simplify, Friendly, Confident" width="380" /><br />
+      <sub><b>Eleven rewrite styles, one row.</b><br />Humanize and Prompt Optimize are two of them, not separate actions.</sub>
+    </td>
+  </tr>
 </table>
 
-## The nine actions
+## The seven actions
 
 | Action | What it does | Needs |
 |---|---|---|
 | **Proofread** | Spelling, grammar and punctuation | a selection |
-| **Rewrite** | Clearer wording, with an optional surrounding-context toggle | a selection |
-| **Humanize** | Makes model-flavoured prose read naturally | a selection |
-| **Prompt Optimize** | Turns a rough prompt into a precise one | a selection |
+| **Rewrite** | Eleven writing styles, plus an optional surrounding-context toggle | a selection |
 | **Translate** | Into the target language, chosen from a dropdown or typed freehand | a selection |
 | **Synonyms** / **Antonyms** | Up to five concise alternatives | a single word |
 | **Compose** | Drafts new text from a brief, optionally using the surrounding sentences | an empty caret |
@@ -74,13 +79,35 @@ Select a sentence in any app, press **Ctrl+Alt+E**, and Emendly offers the actio
 
 Actions are also reachable with the number keys, and `Tab` expands the full grouped list with a filter box.
 
+### Rewrite styles
+
+Pick the style on the Rewrite row with `Space`, exactly like the target language on Translate. The choice
+persists, so the next rewrite starts where you left off.
+
+| Style | What it does |
+|---|---|
+| **Improve** | Clearer and more natural, same meaning (default) |
+| **Humanize** | Natural human voice, varied rhythm, no stock phrasing |
+| **Professional** | Workplace register, no slang, no exclamation marks |
+| **Academic** | Formal scholarly register, precise and hedged |
+| **Streamline** | Shorter and tighter, same information |
+| **Creative** | More vivid phrasing, still truthful |
+| **Simplify** | Plain language, short sentences, common words |
+| **Friendly** | Warm and approachable |
+| **Confident** | Direct and assertive, no hedging |
+| **Diplomatic** | Tactful, softens disagreement |
+| **Prompt Optimize** | Clarifies a *prompt* for a model instead of rewriting prose |
+
+Humanize and Prompt Optimize used to be separate top-level actions. They are two of these styles, because
+that is what they always were.
+
 ## How it decides what to offer
 
 | What Emendly sees | What you get |
 |---|---|
 | Empty caret | Compose, Custom Prompt |
 | One word selected | Proofread, Translate, Synonyms |
-| A sentence or passage | Proofread, Rewrite, Translate, Humanize, Prompt Optimize |
+| A sentence or passage | Proofread, Rewrite, Translate |
 | Read-only text (PDF viewers, terminals) | the same menu, except results can only be copied, not inserted |
 
 Read-only windows are detected rather than guessed: Emendly never pastes into a field that cannot take text.
